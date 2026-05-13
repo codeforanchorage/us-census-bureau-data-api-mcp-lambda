@@ -14,9 +14,7 @@ import { BaseTool } from './base.tool.js'
 
 import { ToolContent } from '../types/base.types.js'
 
-export const toolDescription = `
-  Returns complete catalog of available U.S. Census Bureau datasets with titles, identifiers, and available years. Use this tool FIRST when users request Census data but don't specify which dataset, or when you're unsure which dataset contains the requested statistics. Essential for mapping user requests about demographics, economics, housing, business, or government data to the correct Census dataset. After receiving results, analyze the catalog to identify the best dataset match based on topic relevance and temporal scope, then explain your reasoning to the user.
-`
+export const toolDescription = `Call this FIRST when the user asks for Census data but has not named a specific dataset; do not guess the dataset_id. Returns the full Census Bureau catalog of dataset IDs, titles, and available vintages so you can pick the right one. Workflow: list-datasets -> search-data-tables -> fetch-dataset-geography -> resolve-geography-fips -> fetch-aggregate-data.`
 
 export class ListDatasetsTool extends BaseTool<object> {
   name = 'list-datasets'
@@ -142,14 +140,14 @@ export class ListDatasetsTool extends BaseTool<object> {
       const response = await fetch(catalogUrl)
       if (!response.ok) {
         return this.createErrorResponse(
-          `Failed to fetch catalog: ${response.status} ${response.statusText}`,
+          `Census catalog returned ${response.status} ${response.statusText}. Retry after a short delay; if the failure persists the Census Data API may be unavailable.`,
         )
       }
 
       const data = await response.json()
       if (!this.isValidMetadataResponse(data)) {
         return this.createErrorResponse(
-          'Catalog response did not match expected metadata schema',
+          'Catalog response did not match the expected metadata schema. The Census Data API may have returned an unexpected payload; retry, and if the failure persists report it as a catalog-format issue.',
         )
       }
 
@@ -178,7 +176,7 @@ export class ListDatasetsTool extends BaseTool<object> {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error occurred'
       return this.createErrorResponse(
-        `Failed to fetch datasets: ${errorMessage}`,
+        `Failed to fetch datasets: ${errorMessage}. Retry once network connectivity to api.census.gov is restored.`,
       )
     }
   }

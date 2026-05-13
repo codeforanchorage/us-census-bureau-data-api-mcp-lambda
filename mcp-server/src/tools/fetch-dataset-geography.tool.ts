@@ -15,9 +15,7 @@ import {
   ParsedGeographyEntry,
 } from '../types/summary-level.types.js'
 
-export const toolDescription = `
-  Returns available geographic levels and filtering options for a specific Census dataset. Use this tool BEFORE fetch-aggregate-data when you need to discover what geographic breakdowns are available (state, county, tract, place, etc.) for a dataset, or when users ask about geographic coverage. Required when constructing geography queries for unfamiliar datasets. Provides query syntax, codes, and hierarchy information for each geographic level.
-`
+export const toolDescription = `Call this BEFORE fetch-aggregate-data to confirm which geographic levels the dataset actually supports; do not assume tract or block-group data is available. Supported levels are dataset-specific (a 1-year ACS does not publish tract data) -- skipping this check is how models silently answer neighborhood-level questions with state-level data. Returns query syntax, FIPS codes, and parent-geography hierarchy per level.`
 
 export class FetchDatasetGeographyTool extends BaseTool<FetchDatasetGeographyArgs> {
   name = 'fetch-dataset-geography'
@@ -187,7 +185,7 @@ export class FetchDatasetGeographyTool extends BaseTool<FetchDatasetGeographyArg
       const isDbHealthy = await this.dbService.healthCheck()
       if (!isDbHealthy) {
         return this.createErrorResponse(
-          'Database connection failed - cannot retrieve geography metadata.',
+          'Database connection failed; cannot retrieve geography metadata. Retry once the local mcp-db container is up.',
         )
       }
 
@@ -232,13 +230,22 @@ export class FetchDatasetGeographyTool extends BaseTool<FetchDatasetGeographyArg
           console.error('Schema validation failed:', validationMessage)
 
           return this.createErrorResponse(
-            `Response validation failed: ${validationMessage}`,
+            `Response validation failed: ${validationMessage}. The Census Data API may have returned an unexpected payload; retry, and if the failure persists report it as a schema-format issue.`,
           )
         }
       } else {
         console.log(geographyResponse.status)
+        const status = geographyResponse.status
+        let recovery = ''
+        if (status === 404) {
+          recovery =
+            ' The dataset/year combination was not found; call list-datasets to confirm the dataset exists and which vintages are published.'
+        } else {
+          recovery =
+            ' Retry after a short delay; if the failure persists call list-datasets to confirm the dataset is still published.'
+        }
         return this.createErrorResponse(
-          `Geography endpoint returned: ${geographyResponse.status} ${geographyResponse.statusText}`,
+          `Census geography endpoint returned ${status} ${geographyResponse.statusText}.${recovery}`,
         )
       }
     } catch (error) {
@@ -246,7 +253,7 @@ export class FetchDatasetGeographyTool extends BaseTool<FetchDatasetGeographyArg
         error instanceof Error ? error.message : 'Unknown error occurred'
 
       return this.createErrorResponse(
-        `Failed to fetch dataset geography levels: ${errorMessage}`,
+        `Failed to fetch dataset geography levels: ${errorMessage}. Retry once network connectivity to api.census.gov is restored.`,
       )
     }
   }

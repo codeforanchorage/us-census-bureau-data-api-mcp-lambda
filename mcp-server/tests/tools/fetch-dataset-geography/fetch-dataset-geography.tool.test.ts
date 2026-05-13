@@ -206,7 +206,7 @@ describe('FetchDatasetGeographyTool', () => {
       const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY!)
       validateResponseStructure(response)
       expect((response.content[0] as TextContent).text).toContain(
-        'Database connection failed - cannot retrieve geography metadata',
+        'Database connection failed',
       )
     })
 
@@ -374,7 +374,7 @@ describe('FetchDatasetGeographyTool', () => {
       const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY!)
       validateResponseStructure(response)
       expect((response.content[0] as TextContent).text).toContain(
-        'Geography endpoint returned: 400 Bad Request',
+        'Census geography endpoint returned 400 Bad Request',
       )
     })
 

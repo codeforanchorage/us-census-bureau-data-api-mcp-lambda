@@ -1,11 +1,21 @@
 import { z } from 'zod'
 
+const SUMMARY_LEVEL_HINT =
+  'Optional filter for the geography summary level. Accepts either a name ("State", "County", "Place", "Census Tract", "Block Group", "County Subdivision", "ZIP Code Tabulation Area", "Congressional District") or a 3-digit code ("040", "050", "160", "140", "150"). Resolution uses fuzzy match -- pass the most common form first.'
+
 export const ResolveGeographyFipsInputSchema = z.object({
-  geography_name: z.string().describe('The name of the Geography to resolve.'),
-  summary_level: z
+  geography_name: z
     .string()
-    .describe('The name or code of the Summary Level to search.')
-    .optional(),
+    .min(1)
+    .describe('The geography to resolve, e.g. "Philadelphia, Pennsylvania", "Cook County", "Alaska".'),
+  summary_level: z.string().min(1).optional().describe(SUMMARY_LEVEL_HINT),
+  limit: z
+    .number()
+    .int()
+    .positive()
+    .max(100)
+    .optional()
+    .describe('Maximum number of matching geographies to return. Defaults to 25.'),
 })
 
 export const ResolveGeographyFipsArgsSchema = {
@@ -13,7 +23,8 @@ export const ResolveGeographyFipsArgsSchema = {
   properties: {
     geography_name: {
       type: 'string',
-      description: 'The name of the geography to resolve.',
+      description:
+        'The geography to resolve, e.g. "Philadelphia, Pennsylvania", "Cook County", "Alaska".',
       examples: [
         'Philadelphia city, Pennsylvania',
         'Philadelphia County, Pennsylvania',
@@ -23,18 +34,12 @@ export const ResolveGeographyFipsArgsSchema = {
     },
     summary_level: {
       type: 'string',
-      description:
-        'Filters the geography resolution by the name or summary level code of a matching summary level.',
-      examples: [
-        'Place',
-        '160',
-        'County Subdivision',
-        'County',
-        'State',
-        '040',
-        'Division',
-        'Region',
-      ],
+      description: SUMMARY_LEVEL_HINT,
+      examples: ['State', 'County', 'Place', 'Census Tract', '040', '050', '160'],
+    },
+    limit: {
+      type: 'number',
+      description: 'Maximum number of matching geographies to return. Defaults to 25.',
     },
   },
   required: ['geography_name'],

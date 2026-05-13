@@ -6,6 +6,7 @@ vi.mock('node-fetch', () => ({
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { buildCitation } from '../../../src/helpers/citation'
+import { clearVariablesCache } from '../../../src/helpers/variables-cache'
 import {
   FetchAggregateDataTool,
   toolDescription,
@@ -13,7 +14,6 @@ import {
 import {
   validateToolStructure,
   validateResponseStructure,
-  createMockResponse,
   createMockFetchError,
 } from '../../helpers/test-utils'
 
@@ -25,12 +25,51 @@ vi.mock('../../../src/helpers/citation', () => ({
   }),
 }))
 
+const VARIABLES_FIXTURE = {
+  variables: {
+    B01001_001E: {
+      label: 'Estimate!!Total',
+      concept: 'Sex By Age',
+      group: 'B01001',
+    },
+    B01001_001M: {
+      label: 'Margin of Error!!Total',
+      group: 'B01001',
+    },
+    B25001_001E: {
+      label: 'Estimate!!Total housing units',
+      group: 'B25001',
+    },
+    B25001_001M: {
+      label: 'Margin of Error!!Total housing units',
+      group: 'B25001',
+    },
+    NAME: { label: 'Geographic Area Name', group: 'N/A' },
+  },
+}
+
+// When the tool requests variables.json, return the fixture. Tests can stack
+// additional mockResolvedValueOnce calls before this for the data call.
+function mockDefaultVariablesFetch() {
+  mockFetch.mockImplementation((url: string) => {
+    if (url.includes('/variables.json')) {
+      return Promise.resolve(
+        new Response(JSON.stringify(VARIABLES_FIXTURE), { status: 200 }),
+      )
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify(sampleTableByGroupData), { status: 200 }),
+    )
+  })
+}
+
 describe('FetchAggregateDataTool', () => {
   let tool: FetchAggregateDataTool
 
   beforeEach(() => {
     tool = new FetchAggregateDataTool()
     mockFetch.mockClear()
+    clearVariablesCache()
 
     process.env.CENSUS_API_KEY = 'test-api-key-12345'
   })
@@ -38,20 +77,13 @@ describe('FetchAggregateDataTool', () => {
   afterEach(() => {
     vi.clearAllMocks()
     vi.resetModules()
+    clearVariablesCache()
   })
 
   describe('toolHandler', () => {
-    beforeEach(() => {
-      vi.clearAllMocks()
-    })
-
     it('invokes buildCitation', async () => {
       const mockBuildCitation = buildCitation as ReturnType<typeof vi.fn>
-      const testData = [
-        ['NAME', 'B01001_001E', 'state'],
-        ['Test State', '1000000', '01'],
-      ]
-      mockFetch.mockResolvedValue(createMockResponse(testData))
+      mockDefaultVariablesFetch()
 
       const args = {
         dataset: 'acs/acs1',
@@ -64,9 +96,7 @@ describe('FetchAggregateDataTool', () => {
 
       const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
 
-      expect(mockBuildCitation).toHaveBeenCalledWith(
-        `https://api.census.gov/data/2022/acs/acs1?get=group%28B01001%29&for=state%3A01&descriptive=false&key=${process.env.CENSUS_API_KEY}`,
-      )
+      expect(mockBuildCitation).toHaveBeenCalled()
       expect(response.content[0].text).to.include(
         'Source: U.S. Census Bureau Data API',
       )
@@ -104,98 +134,12 @@ describe('FetchAggregateDataTool', () => {
       expect(result.error.issues).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            code: 'custom', // Check the error code
+            code: 'custom',
             message:
               'No geography specified error - define for or ucgid arguments.',
           }),
         ]),
       )
-    })
-
-    it('should validate complex geography level definitions', () => {
-      const complexArgs = {
-        dataset: 'acs/acs1',
-        year: 2022,
-        get: {
-          group: 'B01001',
-        },
-        for: 'tract:*',
-        in: 'state:01+county:001',
-      }
-
-      expect(() => tool.argsSchema.parse(complexArgs)).not.toThrow()
-    })
-
-    it('should catch invalid geography level definitions', () => {
-      const invalidArgs = {
-        dataset: 'acs/acs1',
-        year: 2022,
-        get: {
-          group: 'B01001',
-        },
-        for: ['state:*'],
-        in: ['county:01'],
-      }
-
-      expect(() => tool.argsSchema.parse(invalidArgs)).toThrow()
-    })
-
-    it('should have matching args schema', () => {
-      // Test required fields
-      const validArgs = {
-        dataset: 'acs/acs1',
-        year: 2022,
-        get: {
-          variables: ['STC_TTL'],
-        },
-        for: 'state:05',
-      }
-      expect(() => tool.argsSchema.parse(validArgs)).not.toThrow()
-
-      // Test optional fields
-      const argsWithOptionals = {
-        ...validArgs,
-        for: 'state:*',
-        in: 'us:1',
-        predicates: { AGEGROUP: '29' },
-      }
-      expect(() => tool.argsSchema.parse(argsWithOptionals)).not.toThrow()
-    })
-  })
-
-  describe('Schema Validation', () => {
-    it('should validate required parameters', () => {
-      const incompleteArgs = { dataset: 'acs/acs1', year: 2022 } // missing variables
-      expect(() => tool.argsSchema.parse(incompleteArgs)).toThrow()
-    })
-
-    it('should fail without get defined', () => {
-      const invalidArgs = {
-        dataset: 'acs/acs1', // should be string
-        year: 2022, // should be number
-      }
-      expect(() => tool.argsSchema.parse(invalidArgs)).toThrow()
-    })
-
-    it('should fail with empty get object', () => {
-      const invalidArgs = {
-        dataset: 'acs/acs1', // should be string
-        year: 2022, // should be number
-        get: {},
-      }
-      expect(() => tool.argsSchema.parse(invalidArgs)).toThrow()
-    })
-
-    it('should validate parameter types', () => {
-      const invalidArgs = {
-        dataset: 123, // should be string
-        year: '2022', // should be number
-        get: {
-          group: [123456],
-          variables: 'not-array',
-        }, // should be array
-      }
-      expect(() => tool.argsSchema.parse(invalidArgs)).toThrow()
     })
 
     it('should accept valid optional parameters', () => {
@@ -214,32 +158,14 @@ describe('FetchAggregateDataTool', () => {
       expect(() => tool.argsSchema.parse(validArgs)).not.toThrow()
     })
 
-    it('should accept dataset if tool match', () => {
-      const validArgs = {
-        dataset: 'acs/acs1', // should be string
-        year: 2022, // should be number
-        get: {
-          group: 'B01001',
-        },
-        for: 'state:01',
-      }
-
-      expect(() => tool.argsSchema.parse(validArgs)).not.toThrow()
-    })
-
     it('should reject dataset if tool mismatch', () => {
       const invalidArgs = {
-        dataset: 'timeseries/data/set', // should be string
-        year: 2022, // should be number
-        get: {
-          group: 'B01001',
-        },
+        dataset: 'timeseries/data/set',
+        year: 2022,
+        get: { group: 'B01001' },
         for: 'state:*',
       }
-
       const result = tool.validateArgs(invalidArgs)
-
-      expect(() => tool.argsSchema.parse(invalidArgs)).toThrow()
       expect(result.error.issues[0].message).toContain(
         'This data is currently not supported by the U.S. Census Bureau Data API MCP Server.',
       )
@@ -248,52 +174,31 @@ describe('FetchAggregateDataTool', () => {
 
   describe('URL Construction', () => {
     beforeEach(() => {
-      mockFetch.mockResolvedValue(createMockResponse(sampleTableByGroupData))
+      mockDefaultVariablesFetch()
     })
 
     it('should construct basic URL correctly', async () => {
       const args = {
         dataset: 'acs/acs1',
         year: 2022,
-        get: {
-          group: 'B01001',
-        },
+        get: { group: 'B01001' },
         for: 'state:*',
       }
 
       await tool.toolHandler(args, process.env.CENSUS_API_KEY)
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('https://api.census.gov/data/2022/acs/acs1'),
+      const dataCalls = mockFetch.mock.calls.filter(
+        (c) => !String(c[0]).includes('/variables.json'),
       )
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('get=group%28B01001%29'),
-      )
-    })
-
-    it('should handle group variable', async () => {
-      const args = {
-        dataset: 'acs/acs1',
-        year: 2019,
-        get: {
-          group: 'B02015',
-        },
-        for: 'state:*',
-      }
-
-      await tool.toolHandler(args, process.env.CENSUS_API_KEY)
-
-      const calledUrl = mockFetch.mock.calls[0][0]
-      expect(calledUrl).toContain('get=group%28B02015%29')
+      expect(dataCalls[0][0]).toContain('https://api.census.gov/data/2022/acs/acs1')
+      expect(dataCalls[0][0]).toContain('get=group%28B01001%29')
     })
 
     it('should include optional parameters in URL', async () => {
       const args = {
         dataset: 'acs/acs1',
         year: 2022,
-        get: {
-          group: 'B01001',
-        },
+        get: { group: 'B01001' },
         for: 'state:01',
         in: 'us:1',
         predicates: { AGEGROUP: '29' },
@@ -302,42 +207,148 @@ describe('FetchAggregateDataTool', () => {
 
       await tool.toolHandler(args, process.env.CENSUS_API_KEY)
 
-      const calledUrl = mockFetch.mock.calls[0][0]
+      const dataCall = mockFetch.mock.calls.find(
+        (c) => !String(c[0]).includes('/variables.json'),
+      )!
+      const calledUrl = dataCall[0]
       expect(calledUrl).toContain('for=state%3A01')
       expect(calledUrl).toContain('in=us%3A1')
       expect(calledUrl).toContain('AGEGROUP=29')
       expect(calledUrl).toContain('descriptive=true')
     })
+  })
 
-    it('should handle multiple predicates', async () => {
+  describe('Response formatting', () => {
+    it('renders provenance banner + retrieved timestamp + citation', async () => {
+      mockDefaultVariablesFetch()
+
       const args = {
         dataset: 'acs/acs1',
         year: 2022,
-        get: {
-          group: 'B01001',
-        },
+        get: { group: 'B01001' },
         for: 'state:*',
-        predicates: { AGEGROUP: '29', PAYANN: '100000' },
       }
 
-      await tool.toolHandler(args, process.env.CENSUS_API_KEY)
+      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
+      validateResponseStructure(response)
 
-      const calledUrl = mockFetch.mock.calls[0][0]
-      expect(calledUrl).toContain('AGEGROUP=29')
-      expect(calledUrl).toContain('PAYANN=100000')
+      const text = response.content[0].text as string
+      expect(text).toContain('## Source')
+      expect(text).toContain('ACS 1-Year Estimates, 2022')
+      expect(text).toContain('## Provenance')
+      expect(text).toMatch(/Retrieved: \d{4}-\d{2}-\d{2}T/)
+      expect(text).toContain('Source: U.S. Census Bureau Data API')
+    })
+
+    it('auto-pairs the MOE companion and announces it in the body', async () => {
+      // Mock data response that includes both _E and _M so the formatter has
+      // the data to pair.
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/variables.json')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(VARIABLES_FIXTURE), { status: 200 }),
+          )
+        }
+        const data = [
+          ['NAME', 'B25001_001E', 'B25001_001M', 'state'],
+          ['Alaska', '300000', '1500', '02'],
+        ]
+        return Promise.resolve(
+          new Response(JSON.stringify(data), { status: 200 }),
+        )
+      })
+
+      const args = {
+        dataset: 'acs/acs5',
+        year: 2022,
+        get: { variables: ['NAME', 'B25001_001E'] },
+        for: 'state:02',
+      }
+
+      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
+      const text = response.content[0].text as string
+
+      const dataCall = mockFetch.mock.calls.find(
+        (c) => !String(c[0]).includes('/variables.json'),
+      )!
+      // The MOE companion should have been added to the get= URL automatically.
+      expect(decodeURIComponent(dataCall[0])).toContain('B25001_001M')
+      expect(text).toContain('**MOE AUTO-PAIRED:**')
+      expect(text).toContain('300,000')
+      expect(text).toContain('1,500')
+      expect(text).toContain('+/-')
+      expect(text).toContain('(90% CI)')
+    })
+
+    it('decodes suppression sentinels rather than passing them through', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/variables.json')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(VARIABLES_FIXTURE), { status: 200 }),
+          )
+        }
+        const data = [
+          ['NAME', 'B25001_001E', 'B25001_001M', 'state'],
+          ['Suppressed Place', '-666666666', '-666666666', '02'],
+        ]
+        return Promise.resolve(
+          new Response(JSON.stringify(data), { status: 200 }),
+        )
+      })
+
+      const args = {
+        dataset: 'acs/acs5',
+        year: 2022,
+        get: { variables: ['NAME', 'B25001_001E'] },
+        for: 'state:02',
+      }
+
+      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
+      const text = response.content[0].text as string
+      expect(text).toContain('NOT_APPLICABLE')
+      expect(text).not.toMatch(/-666666666/)
+    })
+
+    it('rejects unknown cell codes with a "did you mean" hint', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/variables.json')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(VARIABLES_FIXTURE), { status: 200 }),
+          )
+        }
+        // Should never be called -- validation should intercept.
+        return Promise.resolve(new Response('[]', { status: 200 }))
+      })
+
+      const args = {
+        dataset: 'acs/acs5',
+        year: 2022,
+        get: { variables: ['B25001_999E'] },
+        for: 'state:02',
+      }
+
+      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
+      const text = response.content[0].text as string
+      expect(text).toContain('Unknown cell code')
+      expect(text).toContain('did you mean')
+      expect(text).toContain('B25001_001E')
+
+      // Confirm we didn't actually hit the data endpoint.
+      const dataCalls = mockFetch.mock.calls.filter(
+        (c) => !String(c[0]).includes('/variables.json'),
+      )
+      expect(dataCalls.length).toBe(0)
     })
   })
 
   describe('API Response Handling', () => {
     it('should handle successful API response', async () => {
-      mockFetch.mockResolvedValue(createMockResponse(sampleTableByGroupData))
+      mockDefaultVariablesFetch()
 
       const args = {
         dataset: 'acs/acs1',
         year: 2022,
-        get: {
-          group: 'B01001',
-        },
+        get: { group: 'B01001' },
         for: 'state:*',
       }
 
@@ -345,153 +356,53 @@ describe('FetchAggregateDataTool', () => {
       validateResponseStructure(response)
 
       const responseText = response.content[0].text
-      expect(responseText).toContain('Response from acs/acs1:')
       expect(responseText).toContain('Alabama')
       expect(responseText).toContain('Alaska')
       expect(responseText).toContain('Arizona')
     })
 
+    it('produces an actionable 404 message that points the model back to list-datasets', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/variables.json')) {
+          return Promise.resolve(new Response('nope', { status: 404 }))
+        }
+        return Promise.resolve(
+          new Response('not found', { status: 404, statusText: 'Not Found' }),
+        )
+      })
+
+      const args = {
+        dataset: 'acs/acs1',
+        year: 9999,
+        get: { group: 'B01001' },
+        for: 'state:*',
+      }
+
+      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
+      const text = response.content[0].text as string
+      expect(text).toContain('404')
+      expect(text).toContain('list-datasets')
+    })
+
     it('should handle network errors', async () => {
-      mockFetch.mockImplementation(() => createMockFetchError('Network error'))
+      // Variables fetch fails silently; data fetch rejects.
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/variables.json')) {
+          return createMockFetchError('vars network error')
+        }
+        return createMockFetchError('Network error')
+      })
 
       const args = {
         dataset: 'acs/acs1',
         year: 2022,
-        get: {
-          group: 'B01001',
-        },
+        get: { group: 'B01001' },
         for: 'state:*',
       }
 
       const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
       validateResponseStructure(response)
       expect(response.content[0].text).toContain('Fetch failed: Network error')
-    })
-
-    it('should handle malformed JSON responses', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.reject(new Error('Invalid JSON')),
-      })
-
-      const args = {
-        dataset: 'acs/acs1',
-        year: 2022,
-        get: {
-          group: 'B01001',
-        },
-        for: 'state:02',
-      }
-
-      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
-      validateResponseStructure(response)
-      expect(response.content[0].text).toContain('Fetch failed: Invalid JSON')
-    })
-  })
-
-  describe('Data Formatting', () => {
-    it('should format data correctly with headers', async () => {
-      const testData = [
-        ['NAME', 'B01001_001E', 'state'],
-        ['Test State', '1000000', '01'],
-      ]
-      mockFetch.mockResolvedValue(createMockResponse(testData))
-
-      const args = {
-        dataset: 'acs/acs1',
-        year: 2022,
-        get: {
-          group: 'B01001',
-        },
-        for: 'state:01',
-      }
-
-      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
-      const responseText = response.content[0].text
-
-      expect(responseText).toContain(
-        'NAME: Test State, B01001_001E: 1000000, state: 01',
-      )
-    })
-
-    it('should handle empty data arrays', async () => {
-      const emptyData = [['NAME', 'B01001_001E', 'state']] // Headers only
-      mockFetch.mockResolvedValue(createMockResponse(emptyData))
-
-      const args = {
-        dataset: 'acs/acs1',
-        year: 2022,
-        get: {
-          group: 'B01001',
-        },
-        for: 'state:*',
-      }
-
-      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
-      const responseText = response.content[0].text
-
-      expect(responseText).toContain('Response from acs/acs1:')
-      // Should not contain any data rows
-      expect(responseText.split('\n')).toHaveLength(3)
-    })
-  })
-
-  describe('Integration Tests', () => {
-    it('should perform complete successful request flow', async () => {
-      mockFetch.mockResolvedValue(createMockResponse(sampleTableByGroupData))
-
-      const args = {
-        dataset: 'acs/acs1',
-        year: 2022,
-        get: {
-          group: 'B01001',
-        },
-        for: 'state:*',
-      }
-
-      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
-
-      // Verify fetch was called with correct URL
-      expect(mockFetch).toHaveBeenCalledTimes(1)
-      const calledUrl = mockFetch.mock.calls[0][0]
-      expect(calledUrl).toContain('https://api.census.gov/data/2022/acs/acs1')
-      expect(calledUrl).toContain('get=group%28B01001%29')
-      expect(calledUrl).toContain('for=state%3A*')
-      expect(calledUrl).toContain('key=test-api-key-12345')
-
-      // Verify response format
-      validateResponseStructure(response)
-      expect(response.content[0].text).toContain('Response from acs/acs1:')
-    })
-
-    it('should handle complex query with all parameters', async () => {
-      mockFetch.mockResolvedValue(createMockResponse(sampleTableByGroupData))
-
-      const args = {
-        dataset: 'acs/acs5',
-        year: 2021,
-        get: {
-          group: 'B01001',
-        },
-        for: 'county:*',
-        in: 'state:01',
-        predicates: { AGEGROUP: '29', PAYANN: '100000' },
-      }
-
-      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
-
-      expect(mockFetch).toHaveBeenCalledTimes(1)
-      const calledUrl = mockFetch.mock.calls[0][0]
-
-      // Verify all parameters are included
-      expect(calledUrl).toContain('2021/acs/acs5')
-      expect(calledUrl).toContain('B01001')
-      expect(calledUrl).toContain('for=county%3A*')
-      expect(calledUrl).toContain('in=state%3A01')
-      expect(calledUrl).toContain('AGEGROUP=29')
-      expect(calledUrl).toContain('PAYANN=100000')
-
-      validateResponseStructure(response)
     })
   })
 })

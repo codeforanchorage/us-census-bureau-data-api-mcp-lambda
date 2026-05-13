@@ -35,7 +35,7 @@ export class PopulationPrompt extends BasePrompt<
 
     // This should work now that we have proper inheritance
     return this.createPromptResponse(
-      `What’s the population of ${geography_name}?`,
+      `What's the population of ${geography_name}?`,
       promptText,
     )
   }

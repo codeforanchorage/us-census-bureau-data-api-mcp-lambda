@@ -26,6 +26,8 @@ import {
   ResolveGeographyFipsTool,
   toolDescription,
 } from '../../../src/tools/resolve-geography-fips.tool'
+import { SummaryLevelRow } from '../../../src/types/summary-level.types'
+import { GeographySearchResultRow } from '../../../src/types/geography.types'
 
 const defaultArgs = {
   geography_name: 'Philadelphia, Pennsylvania',
@@ -116,6 +118,7 @@ describe('ResolveGeographyFipsTool', () => {
     expect(schema.type).toBe('object')
     expect(schema.properties).toHaveProperty('geography_name')
     expect(schema.properties).toHaveProperty('summary_level')
+    expect(schema.properties).toHaveProperty('limit')
     expect(schema.required).toEqual(['geography_name'])
   })
 
@@ -135,8 +138,9 @@ describe('ResolveGeographyFipsTool', () => {
 
       const response = await tool.handler(defaultArgs)
       validateResponseStructure(response)
+      expect(response.content[0].text).toContain('Database connection failed')
       expect(response.content[0].text).toContain(
-        'Database connection failed - cannot retrieve geography metadata',
+        'cannot retrieve geography metadata',
       )
     })
 
@@ -190,7 +194,7 @@ describe('ResolveGeographyFipsTool', () => {
     })
 
     describe('when there are geography results', () => {
-      it('returns the found geographies', async () => {
+      it('renders matches as numbered Record blocks with FIPS query params', async () => {
         mockGeographies = [
           {
             id: 1,
@@ -220,16 +224,53 @@ describe('ResolveGeographyFipsTool', () => {
 
         expect(result.content).toHaveLength(1)
         expect(result.content[0].type).toBe('text')
-        expect(result.content[0].text).toContain(
-          'Found 2 Matching Geographies:',
+        const text = result.content[0].text as string
+        expect(text).toContain('## Records')
+        expect(text).toContain('Record 1:')
+        expect(text).toContain('Record 2:')
+        expect(text).toContain('name: Los Angeles')
+        expect(text).toContain('for: place:44000')
+        expect(text).toContain('in: state:06')
+      })
+
+      it('emits a ## Caveats TRUNCATED notice when matches exceed limit', async () => {
+        const many: GeographySearchResultRow[] = Array.from(
+          { length: 5 },
+          (_, i) => ({
+            id: i,
+            name: `Place ${i}`,
+            summary_level_name: 'Place',
+            latitude: 0,
+            longitude: 0,
+            for_param: `place:${i.toString().padStart(5, '0')}`,
+            in_param: 'state:06',
+            weighted_score: 1 - i * 0.1,
+          }),
         )
-        expect(result.content[0].text).toContain('Los Angeles')
-        expect(result.content[0].text).toContain('Los Angeles County')
+        mockDbService.query.mockResolvedValue({ rows: many })
+
+        const result = await tool.handler({
+          geography_name: 'Place',
+          limit: 2,
+        })
+        const text = result.content[0].text as string
+        expect(text).toContain('## Caveats')
+        expect(text).toContain('**TRUNCATED:**')
+        expect(text).toContain('Record 1:')
+        expect(text).toContain('Record 2:')
+        expect(text).not.toContain('Record 3:')
+        expect(text).toMatch(/\(Reminder:.*\)/)
+      })
+
+      it('emits ASCII only', () => {
+        for (const ch of tool.description) {
+          expect(ch.charCodeAt(0)).toBeLessThanOrEqual(127)
+        }
       })
     })
 
     describe('when there are no geography results', () => {
-      it('returns a message indicating no results', async () => {
+      it('returns an actionable no-results message that suggests recovery', async () => {
         mockDbService.query.mockResolvedValue({ rows: [] })
 
         const result = await tool.handler({
@@ -238,12 +279,13 @@ describe('ResolveGeographyFipsTool', () => {
 
         expect(result.content).toHaveLength(1)
         expect(result.content[0].type).toBe('text')
-        expect(result.content[0].text).toContain(
-          'No geographies found matching "NonexistentPlace".',
-        )
+        const text = result.content[0].text as string
+        expect(text).toContain('## Result')
+        expect(text).toContain('No geographies matched "NonexistentPlace"')
+        expect(text).toMatch(/Retry/)
       })
 
-      it('includes summary level context when specified', async () => {
+      it('includes the summary_level filter context in the no-results message', async () => {
         mockDbService.query
           .mockResolvedValueOnce({ rows: [{ code: '050', name: 'County' }] }) // summary level found
           .mockResolvedValueOnce({ rows: [] }) // no geographies found
@@ -253,9 +295,9 @@ describe('ResolveGeographyFipsTool', () => {
           summary_level: 'County',
         })
 
-        expect(result.content[0].text).toContain(
-          'No geographies found matching "NonexistentPlace".',
-        )
+        const text = result.content[0].text as string
+        expect(text).toContain('No geographies matched "NonexistentPlace"')
+        expect(text).toContain('at summary level "County"')
       })
     })
   })

@@ -165,8 +165,9 @@ describe('SearchDataTablesTool', () => {
       const response = await tool.handler(byIdArgs)
       validateResponseStructure(response)
       expect(getTextContent(response).text).toContain(
-        'Database connection failed - cannot search data tables.',
+        'Database connection failed',
       )
+      expect(getTextContent(response).text).toContain('cannot search data tables')
     })
 
     it('should handle database query errors gracefully', async () => {
@@ -212,43 +213,45 @@ describe('SearchDataTablesTool', () => {
 
   describe('Response Handling', () => {
     describe('when results are found', () => {
-      it('returns the matching data tables', async () => {
+      it('renders matching data tables as numbered Record blocks', async () => {
         const result = await tool.handler(byLabelArgs)
 
         expect(result.content).toHaveLength(1)
         expect(result.content[0].type).toBe('text')
-        expect(getTextContent(result).text).toContain(
-          'Found 2 Matching Data Tables:',
-        )
-        expect(getTextContent(result).text).toContain('B16005')
-        expect(getTextContent(result).text).toContain('B16005D')
+        const text = getTextContent(result).text
+        expect(text).toContain('## Records')
+        expect(text).toContain('Record 1:')
+        expect(text).toContain('Record 2:')
+        expect(text).toContain('data_table_id: B16005')
+        expect(text).toContain('data_table_id: B16005D')
       })
 
-      it('uses singular form when exactly one result is returned', async () => {
-        mockDbService.query.mockResolvedValue({ rows: [mockDataTables[0]] })
-
+      it('shows the component and datasets per record', async () => {
         const result = await tool.handler(byIdArgs)
-
-        expect(getTextContent(result).text).toContain(
-          'Found 1 Matching Data Table:',
+        const text = getTextContent(result).text
+        expect(text).toContain(
+          'component: American Community Survey - ACS 1-Year Estimates',
         )
-        expect(getTextContent(result).text).not.toContain('Data Tables:')
+        expect(text).toMatch(/datasets: 2009: acs\/acs1; 2010: acs\/acs1/)
       })
 
-      it('serialises component and datasets for each result', async () => {
-        const result = await tool.handler(byIdArgs)
-        const parsed = JSON.parse(getTextContent(result).text.split('\n\n')[1])
-
-        const table = parsed.find(
-          (t: DataTableSearchResultRow) => t.data_table_id === 'B16005',
-        )
-        expect(table.component).toBe(
-          'American Community Survey - ACS 1-Year Estimates',
-        )
-        expect(table.datasets).toEqual({
-          '2009': ['acs/acs1'],
-          '2010': ['acs/acs1'],
+      it('emits a ## Caveats TRUNCATED notice when results equal the limit', async () => {
+        // Fixture has 2 rows; force limit=2 to trigger truncation.
+        const result = await tool.handler({
+          data_table_id: 'B16005',
+          limit: 2,
         })
+        const text = getTextContent(result).text
+        expect(text).toContain('## Caveats')
+        expect(text).toContain('**TRUNCATED:**')
+        expect(text).toMatch(/\(Reminder:.*limited to 2.*\)/)
+      })
+
+      it('emits ASCII only', () => {
+        // sanity: no smart quotes or em-dashes in the tool description either.
+        for (const ch of tool.description) {
+          expect(ch.charCodeAt(0)).toBeLessThanOrEqual(127)
+        }
       })
     })
 
@@ -257,28 +260,14 @@ describe('SearchDataTablesTool', () => {
         mockDbService.query.mockResolvedValue({ rows: [] })
       })
 
-      it('returns a no-results message for a data_table_id search', async () => {
+      it('returns an actionable no-results message for a data_table_id search', async () => {
         const result = await tool.handler({ data_table_id: 'ZZZZZZ' })
-
-        expect(getTextContent(result).text).toBe(
-          'No data tables found matching table ID "ZZZZZZ".',
-        )
-      })
-
-      it('returns a no-results message for a label_query search', async () => {
-        const result = await tool.handler({ label_query: 'nonexistent topic' })
-
-        expect(getTextContent(result).text).toBe(
-          'No data tables found matching label "nonexistent topic".',
-        )
-      })
-
-      it('returns a no-results message for an api_endpoint search', async () => {
-        const result = await tool.handler({ api_endpoint: 'unknown/endpoint' })
-
-        expect(getTextContent(result).text).toBe(
-          'No data tables found matching api endpoint "unknown/endpoint".',
-        )
+        const text = getTextContent(result).text
+        expect(text).toContain('## Result')
+        expect(text).toContain('No data tables matched')
+        expect(text).toContain('data_table_id "ZZZZZZ"')
+        // Should suggest a recovery path without prescribing a magic string.
+        expect(text).toMatch(/Retry/)
       })
 
       it('lists all provided search terms in the no-results message', async () => {
@@ -287,12 +276,10 @@ describe('SearchDataTablesTool', () => {
           label_query: 'obscure topic',
           api_endpoint: 'unknown/endpoint',
         })
-
-        expect(getTextContent(result).text).toContain('table ID "B99999"')
-        expect(getTextContent(result).text).toContain('label "obscure topic"')
-        expect(getTextContent(result).text).toContain(
-          'api endpoint "unknown/endpoint"',
-        )
+        const text = getTextContent(result).text
+        expect(text).toContain('data_table_id "B99999"')
+        expect(text).toContain('label_query "obscure topic"')
+        expect(text).toContain('api_endpoint "unknown/endpoint"')
       })
     })
   })

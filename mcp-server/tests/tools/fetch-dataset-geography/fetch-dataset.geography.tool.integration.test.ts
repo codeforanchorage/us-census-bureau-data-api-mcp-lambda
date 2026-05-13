@@ -165,7 +165,8 @@ describe('FetchDatasetGeographyTool - Integration Tests', () => {
       expect(response.content[0].type).toBe('text')
       const responseText = response.content[0].text
 
-      expect(responseText).toEqual('Geography endpoint returned: 404 ')
+      expect(responseText).toContain('Census geography endpoint returned 404')
+      expect(responseText).toContain('list-datasets')
     })
   })
 
