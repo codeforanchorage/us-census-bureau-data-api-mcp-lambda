@@ -1,7 +1,9 @@
 import 'dotenv/config'
-import { Client, Pool, PoolClient } from 'pg'
+import { Client, Pool, PoolClient, PoolConfig } from 'pg'
 
 type QueryParam = string | number | boolean | null | Date | Buffer
+
+const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME
 
 export class DatabaseService {
   private static instance: DatabaseService
@@ -18,13 +20,22 @@ export class DatabaseService {
       DATABASE_URL.replace(/:[^:@]*@/, ':***@'),
     )
 
-    // Use connection pooling for better performance
-    this.pool = new Pool({
+    const poolConfig: PoolConfig = {
       connectionString: DATABASE_URL,
-      max: 10, // Maximum number of clients in the pool
-      idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-      connectionTimeoutMillis: 2000, // Return error after 2 seconds if connection could not be established
-    })
+      // On Lambda each warm container handles one request at a time, so a big
+      // pool just wastes RDS connections. Locally we keep headroom for tests.
+      max: isLambda ? 2 : 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: isLambda ? 5000 : 2000,
+    }
+
+    if (isLambda) {
+      // RDS uses an AWS-managed CA. rejectUnauthorized: false accepts it
+      // without bundling the cert; upgrade to true + bundled CA later.
+      poolConfig.ssl = { rejectUnauthorized: false }
+    }
+
+    this.pool = new Pool(poolConfig)
   }
 
   // Get singleton instance

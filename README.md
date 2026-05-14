@@ -14,6 +14,7 @@ The *U.S. Census Bureau Data API MCP* is a [Model Context Protocol (MCP)](https:
 ## Contents
 * [Getting Started](#getting-started)
 * [Using the MCP Server](#using-the-mcp-server)
+* [Deploy to AWS Lambda](#deploy-to-aws-lambda)
 * [How the MCP Server Works](#how-the-mcp-server-works)
 * [Development](#development)
 * [MCP Server Architecture](#mcp-server-architecture)
@@ -22,6 +23,110 @@ The *U.S. Census Bureau Data API MCP* is a [Model Context Protocol (MCP)](https:
 * [Available Prompts](#available-prompts)
 * [Helper Scripts](#helper-scripts)
 * [Additional Information](#additional-information)
+
+## Deploy to AWS Lambda
+
+This fork ports the stdio MCP server to a public HTTP endpoint backed by AWS
+Lambda + RDS Postgres, patterned after [CityOfBoston/OpenContext](https://github.com/CityOfBoston/OpenContext).
+
+**Architecture.** `POST /mcp` → API Gateway REST API → Lambda (Node 20, zip
+package) → RDS Postgres (public subnet, SSL required). Lambda is NOT inside a
+VPC — it reaches RDS and `api.census.gov` over the public internet to avoid a
+NAT Gateway (~$32/mo). RDS is public-subnet with SG `0.0.0.0/0:5432`; protection
+is SSL + a 32-char password stored in Secrets Manager, fetched by Lambda on
+cold start.
+
+**Target cost.** ~$15/mo steady state (db.t4g.micro + 20 GB gp3 + Secrets
+Manager + Lambda free tier).
+
+### Prerequisites
+
+- AWS CLI configured for account `420839047325` / region `us-west-2`
+- Terraform ≥ 1.0
+- Node 18+, npm
+- A Census Data API key — https://api.census.gov/data/key_signup.html
+
+### One-time setup
+
+```bash
+# 1. Bootstrap Terraform remote state (S3 + DynamoDB)
+./scripts/setup-backend.sh
+
+# 2. Export your Census API key (the deploy script injects it into Lambda env)
+export CENSUS_API_KEY="your-key-here"
+
+# 3. Deploy staging
+./scripts/deploy.sh --environment staging
+```
+
+The deploy script runs `terraform plan`, shows the diff, and asks for
+confirmation before applying.
+
+### Seed the database
+
+After the first `terraform apply`, RDS is empty. Pull the connection string
+from Secrets Manager and run the existing `mcp-db` migration + seed pipeline
+against RDS (~10–20 minutes, throttled by the Census API):
+
+```bash
+SECRET_ARN=$(cd terraform/aws && terraform output -raw db_secret_arn)
+
+# Fetch and format as a Postgres URL
+export DATABASE_URL=$(aws secretsmanager get-secret-value \
+    --secret-id "$SECRET_ARN" \
+    --query SecretString --output text | \
+    node -e 'const s=JSON.parse(require("fs").readFileSync(0,"utf8"));
+             process.stdout.write(`postgresql://${encodeURIComponent(s.username)}:${encodeURIComponent(s.password)}@${s.host}:${s.port}/${s.dbname}?sslmode=require`)')
+
+cd mcp-db
+npm ci
+npm run migrate:up
+npm run seed
+```
+
+The RDS security group allows `0.0.0.0/0:5432` by default so your laptop can
+reach it. If you want to tighten this, edit `terraform/aws/rds.tf` to scope the
+ingress to your IP and re-apply — but remember to re-open it (or run from a
+machine with a stable IP) when you need to re-seed later.
+
+### Connect Claude
+
+Get the endpoint and add it as a custom connector in Claude Desktop or
+Claude.ai (Settings → Connectors → Add custom connector):
+
+```bash
+cd terraform/aws && terraform output -raw api_gateway_url
+```
+
+### Tear down
+
+```bash
+cd terraform/aws
+terraform destroy -var-file="staging.tfvars" -var="census_api_key=$CENSUS_API_KEY"
+```
+
+The S3 state bucket and DynamoDB lock table (created by `terraform/bootstrap`)
+are retained with `prevent_destroy = true` — remove that lifecycle block and
+re-apply the bootstrap stack if you really want them gone.
+
+### Security posture — read this before using for anything real
+
+- **Public-subnet RDS** with `0.0.0.0/0:5432` ingress. Protected by SSL +
+  strong password, not the security group. Acceptable for a personal test
+  deployment. NOT acceptable for production or sensitive data.
+- **No auth on the MCP endpoint.** The API Gateway uses
+  `authorization = "NONE"` — anyone who finds the URL can call it until daily
+  quota kicks in (default 3000 req/day, 5 req/s). Rotate the URL or raise the
+  quota wall if you post it publicly.
+- **Census API key** lives inside the same Secrets Manager secret as the RDS
+  credentials (key `census_api_key`). The Lambda fetches it on cold start and
+  sets `process.env.CENSUS_API_KEY` before any tool runs. Not visible to
+  `lambda:GetFunction` callers — only to principals with
+  `secretsmanager:GetSecretValue` on the secret ARN. Rotate by editing the
+  secret version; the next cold start picks it up.
+- **Lambda has internet egress** because it's not in a VPC. That's the whole
+  point — it avoids a NAT Gateway — but means the function can reach anything
+  on the public internet. Not a concern unless a tool is compromised.
 
 ## Getting Started
 To get started, you will need:

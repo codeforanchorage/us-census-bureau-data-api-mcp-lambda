@@ -1,0 +1,12 @@
+lambda_name                 = "census-mcp-prod"
+stage_name                  = "prod"
+aws_region                  = "us-west-2"
+lambda_memory               = 1024
+lambda_timeout              = 60
+lambda_reserved_concurrency = 20
+api_quota_limit             = 10000
+api_rate_limit              = 10
+api_burst_limit             = 20
+custom_domain               = "us-census.codeforanchorage.org"
+db_instance_class           = "db.t4g.micro"
+db_allocated_storage        = 20

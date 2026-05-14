@@ -20,6 +20,20 @@ tmp/
 # IDE specific files
 .idea/
 .vscode/
+.claude/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+
+# Secrets
+.secret.tmp.json
+
+# Lambda deployment artifacts
+.deploy/
+lambda-deployment.zip
 
 # System files
 .DS_Store
