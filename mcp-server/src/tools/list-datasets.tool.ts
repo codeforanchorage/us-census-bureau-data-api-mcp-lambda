@@ -16,6 +16,11 @@ import { ToolContent } from '../types/base.types.js'
 
 export const toolDescription = `Call this FIRST when the user asks for Census data but has not named a specific dataset; do not guess the dataset_id. Returns the full Census Bureau catalog of dataset IDs, titles, and available vintages so you can pick the right one. Workflow: list-datasets -> search-data-tables -> fetch-dataset-geography -> resolve-geography-fips -> fetch-aggregate-data.`
 
+// Module-level cache — persists across warm Lambda invocations so repeated
+// calls don't refetch Census's ~2MB data.json catalog every time.
+const CATALOG_TTL_MS = 60 * 60 * 1000
+let catalogCache: { json: string; expiresAt: number } | null = null
+
 export class ListDatasetsTool extends BaseTool<object> {
   name = 'list-datasets'
   description = toolDescription
@@ -133,6 +138,13 @@ export class ListDatasetsTool extends BaseTool<object> {
     args: object,
     apiKey: string,
   ): Promise<{ content: ToolContent[] }> {
+    const now = Date.now()
+    if (catalogCache && catalogCache.expiresAt > now) {
+      return {
+        content: [{ type: 'text', text: catalogCache.json }],
+      }
+    }
+
     try {
       const fetch = (await import('node-fetch')).default
       const catalogUrl = `https://api.census.gov/data.json?key=${apiKey}`
@@ -162,15 +174,14 @@ export class ListDatasetsTool extends BaseTool<object> {
 
       const aggregated = this.aggregateDatasets(simplified)
 
+      const json = JSON.stringify(aggregated, (key, value) => {
+        return value === null ? undefined : value
+      })
+
+      catalogCache = { json, expiresAt: now + CATALOG_TTL_MS }
+
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(aggregated, (key, value) => {
-              return value === null ? undefined : value
-            }),
-          },
-        ],
+        content: [{ type: 'text', text: json }],
       }
     } catch (error) {
       const errorMessage =

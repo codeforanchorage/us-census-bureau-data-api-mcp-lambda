@@ -41,7 +41,11 @@ export class SeedRunner {
     dataPath?: string,
     rateLimitConfig?: Partial<RateLimitConfig>,
   ) {
-    this.client = new Client({ connectionString: dbUrl })
+    this.client = new Client({
+      connectionString: dbUrl,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
+    })
     // Only use __dirname as fallback if no dataPath provided
     const defaultPath = path.join(__dirname, '../../../data')
     this.dataPath = dataPath || defaultPath

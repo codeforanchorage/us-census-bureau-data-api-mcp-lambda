@@ -143,7 +143,7 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
       const fetch = (await import('node-fetch')).default
       const res = await fetch(url)
 
-      console.log(`URL Attempted: ${url}`)
+      console.log(`URL Attempted: ${url.replace(/key=[^&]*/g, 'key=REDACTED')}`)
 
       if (!res.ok) {
         return this.createErrorResponse(
