@@ -384,6 +384,32 @@ describe('FetchAggregateDataTool', () => {
       expect(text).toContain('list-datasets')
     })
 
+    it('explains the ACS 1-year 65,000 population threshold on a 400 and suggests acs/acs5', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/variables.json')) {
+          return Promise.resolve(new Response('nope', { status: 404 }))
+        }
+        return Promise.resolve(
+          new Response('bad request', {
+            status: 400,
+            statusText: 'Bad Request',
+          }),
+        )
+      })
+
+      const args = {
+        dataset: 'acs/acs1',
+        year: 2022,
+        get: { group: 'B01001' },
+        for: 'place:00100',
+      }
+
+      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
+      const text = response.content[0].text as string
+      expect(text).toContain('65,000')
+      expect(text).toContain('acs/acs5')
+    })
+
     it('should handle network errors', async () => {
       // Variables fetch fails silently; data fetch rejects.
       mockFetch.mockImplementation((url: string) => {

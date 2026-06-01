@@ -20,7 +20,7 @@ import {
   validateGeographyArgs,
 } from '../schema/validators.js'
 
-export const toolDescription = `Fetches Census Bureau statistics for a dataset, vintage, and geography; never guess cell codes -- use search-data-tables first or this tool will reject unknown codes with a "did you mean" hint. Every ACS estimate is auto-paired with its margin of error and flagged LOW RELIABILITY when CV exceeds 30%; suppression sentinels are decoded to text rather than returned as numbers. Required: dataset, year, get (variables or group), and one of for/ucgid. Returns numbered Record blocks with caveats led at the top.`
+export const toolDescription = `Fetches Census Bureau statistics for a dataset, vintage, and geography; never guess cell codes -- use search-data-tables first or this tool will reject unknown codes with a "did you mean" hint. Every ACS estimate is auto-paired with its margin of error and flagged LOW RELIABILITY when CV exceeds 30%; suppression sentinels are decoded to text rather than returned as numbers. ACS 1-year (acs/acs1) only covers areas with populations of 65,000+; use acs/acs5 for smaller geographies or the API returns a bare 400. Required: dataset, year, get (variables or group), and one of for/ucgid. Returns numbered Record blocks with caveats led at the top.`
 
 export class FetchAggregateDataTool extends BaseTool<TableArgs> {
   name = 'fetch-aggregate-data'
@@ -218,6 +218,14 @@ function buildApiErrorMessage(
       `Recover by calling list-datasets to confirm the dataset exists and which vintages are published.`,
     )
   } else if (status === 400) {
+    if (isAcs1YearDataset(ctx.dataset)) {
+      lines.push(
+        `ACS 1-year estimates (acs/acs1) are only published for geographic areas with ` +
+          `populations of 65,000 or more, so a 400 here often means the requested area is too small. ` +
+          `Switch the dataset to acs/acs5 (5-year estimates) to cover smaller geographies. ` +
+          `See https://www.census.gov/programs-surveys/acs/guidance/estimates.html.`,
+      )
+    }
     lines.push(
       `The Census API rejected the query as malformed.`,
       `Re-verify the geography (for/in/ucgid) via fetch-dataset-geography and ` +
@@ -229,6 +237,13 @@ function buildApiErrorMessage(
     )
   }
   return lines.join(' ')
+}
+
+// ACS 1-year estimates are only published for areas of 65,000+ people, a
+// frequent cause of opaque 400s. Detect acs1 regardless of spacing/case so the
+// error path can hand back the population-threshold hint above.
+function isAcs1YearDataset(dataset: string): boolean {
+  return dataset.toLowerCase().replace(/\s+/g, '').includes('acs/acs1')
 }
 
 function buildQueryEcho(opts: {

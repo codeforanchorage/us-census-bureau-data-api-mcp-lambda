@@ -218,7 +218,7 @@ export class FetchDatasetGeographyTool extends BaseTool<FetchDatasetGeographyArg
             content: [
               {
                 type: 'text',
-                text: `Available geographies for ${args.dataset}${args.year ? ` (${args.year})` : ''}:\n\n${JSON.stringify(parsedGeographyData, null, 2)}`,
+                text: `Available geographies for ${args.dataset}${args.year ? ` (${args.year})` : ''}:\n\n${JSON.stringify(parsedGeographyData)}`,
               },
             ],
           }
