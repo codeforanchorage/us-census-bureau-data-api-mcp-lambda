@@ -15,7 +15,7 @@ import {
   ParsedGeographyEntry,
 } from '../types/summary-level.types.js'
 
-export const toolDescription = `Call this BEFORE fetch-aggregate-data to confirm which geographic levels the dataset actually supports; do not assume tract or block-group data is available. Supported levels are dataset-specific (a 1-year ACS does not publish tract data) -- skipping this check is how models silently answer neighborhood-level questions with state-level data. Returns query syntax, FIPS codes, and parent-geography hierarchy per level.`
+export const toolDescription = `Call this BEFORE fetch-aggregate-data to confirm which geographic levels the dataset supports; do not assume tract or block-group data is available (a 1-year ACS does not publish tract data). Returns query syntax, FIPS codes, and parent-geography hierarchy per level.`
 
 export class FetchDatasetGeographyTool extends BaseTool<FetchDatasetGeographyArgs> {
   name = 'fetch-dataset-geography'

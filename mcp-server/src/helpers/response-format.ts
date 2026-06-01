@@ -5,18 +5,20 @@
 // and freshness caveats ride along with the data -- the model cannot
 // ignore them because they sit in the same text block.
 //
-// Output is shaped for two consumers: Claude (handles markdown well) and
-// GPT-4o via M365 Copilot (strips some inline formatting and de-prioritises
-// content past the first ~200 tokens). To make caveats land on both:
+// Output is shaped for two consumers: Claude and GPT-5.1 via M365 Copilot
+// (GCC). The structural choices below are about Copilot's *renderer*, not
+// model capability, so they stay regardless of which model is behind it:
 //   - Caveats lead. The "## Caveats" section is the first thing the model
 //     sees so it can't get summarised away.
 //   - "## Section" headers, not just **bold**, so the structure survives
 //     Copilot's renderer.
 //   - Records are numbered blocks ("Record 1:") rather than tables.
-//   - Critical caveats are repeated once at the bottom as a prose reminder
-//     because 4o is more likely to drop a single-mention caveat.
 //   - ASCII only -- "--" instead of em-dash, "+/-" instead of plus-or-minus
 //     -- because Copilot rendering paths occasionally drop non-ASCII.
+// We previously repeated each critical caveat as a trailing prose reminder
+// because GPT-4o dropped single-mention caveats. GPT-5.1 holds a lead caveat
+// reliably, so that duplication is gone -- the flags below carry the weight
+// once, up top.
 
 import { buildCitation } from './citation.js'
 import {
@@ -99,16 +101,10 @@ export function formatAggregateResponse(input: FormatInput): string {
   })
 
   const caveats: string[] = []
-  const proseReminders: string[] = []
 
   // Reliability flags first (the most specific, highest-leverage caveat).
   for (const flag of decoded.reliabilityFlags) {
     caveats.push(flag)
-  }
-  if (decoded.reliabilityFlags.length > 0) {
-    proseReminders.push(
-      'one or more estimates above are flagged LOW RELIABILITY -- use the MOE band, not the point estimate',
-    )
   }
 
   // Single-unit claim caveat.
@@ -116,18 +112,12 @@ export function formatAggregateResponse(input: FormatInput): string {
     caveats.push(
       '**SINGLE-UNIT CLAIM:** this response covers exactly one geography. Do not generalize the estimate to a larger region.',
     )
-    proseReminders.push(
-      'this is a single-geography response -- do not generalize to a larger region',
-    )
   }
 
   // Suppression sentinel caveat.
   if (decoded.sentinelHitCount > 0) {
     caveats.push(
-      `**SUPPRESSED VALUES:** ${decoded.sentinelHitCount} cell(s) in this response were returned as Census suppression sentinels (translated inline as SUPPRESSED, NOT_APPLICABLE, INSUFFICIENT_SAMPLE, etc.). Do not treat these as numeric estimates.`,
-    )
-    proseReminders.push(
-      `${decoded.sentinelHitCount} cell(s) above are suppression sentinels, not numeric estimates`,
+      `**SUPPRESSED VALUES:** ${decoded.sentinelHitCount} cell(s) were Census suppression sentinels, decoded inline (e.g. SUPPRESSED, NOT_APPLICABLE). Do not treat them as numbers.`,
     )
   }
 
@@ -138,7 +128,7 @@ export function formatAggregateResponse(input: FormatInput): string {
   // MOE auto-pairing caveat.
   if (autoAddedMoeFields.length > 0) {
     caveats.push(
-      `**MOE AUTO-PAIRED:** this response includes margin-of-error fields (${autoAddedMoeFields.join(', ')}) that you did not explicitly request. ACS estimates without their MOE are the single biggest source of confidently-wrong Census claims, so they are always returned alongside.`,
+      `**MOE AUTO-PAIRED:** margin-of-error fields (${autoAddedMoeFields.join(', ')}) were added automatically. Report each estimate with its MOE, not on its own.`,
     )
   }
 
@@ -164,10 +154,6 @@ export function formatAggregateResponse(input: FormatInput): string {
   provenance.push(`Retrieved: ${new Date().toISOString()}`)
   sections.push(provenance.join('\n'))
 
-  if (proseReminders.length > 0) {
-    sections.push(`(Reminder: ${proseReminders.join('; ')}.)`)
-  }
-
   return sections.join('\n\n')
 }
 
@@ -191,8 +177,7 @@ function stalenessBanner(
     : ''
   return (
     `**DATA FRESHNESS:** this is ${banner.label} ${banner.yearLabel}${window}. ` +
-    `A more recent release is likely available -- verify with list-datasets ` +
-    `and use the latest vintage unless you specifically need the older window.`
+    `A newer release is likely available -- check list-datasets unless you need this vintage.`
   )
 }
 
@@ -319,9 +304,8 @@ function renderEstimateWithMoe(opts: {
     const geo = opts.geographyName ? ` for ${opts.geographyName}` : ''
     opts.reliabilityFlags.push(
       `**LOW RELIABILITY:** ${opts.estimateCode}${geo} has CV=${cvPct}% ` +
-        `(threshold ${Math.round(cvFlagThreshold * 100)}%). The estimate is ` +
-        `too imprecise to support a precise claim -- use the MOE band, not ` +
-        `the point estimate.`,
+        `(threshold ${Math.round(cvFlagThreshold * 100)}%) -- too imprecise for ` +
+        `a point claim; use the MOE band, not the point estimate.`,
     )
   }
 

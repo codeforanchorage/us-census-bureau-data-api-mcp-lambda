@@ -20,7 +20,7 @@ import {
   validateGeographyArgs,
 } from '../schema/validators.js'
 
-export const toolDescription = `Fetches Census Bureau statistics for a dataset, vintage, and geography; never guess cell codes -- use search-data-tables first or this tool will reject unknown codes with a "did you mean" hint. Every ACS estimate is auto-paired with its margin of error and flagged LOW RELIABILITY when CV exceeds 30%; suppression sentinels are decoded to text rather than returned as numbers. ACS 1-year (acs/acs1) only covers areas with populations of 65,000+; use acs/acs5 for smaller geographies or the API returns a bare 400. Required: dataset, year, get (variables or group), and one of for/ucgid. Returns numbered Record blocks with caveats led at the top.`
+export const toolDescription = `Fetches Census statistics for a dataset, vintage, and geography. Never guess cell codes -- run search-data-tables first. ACS estimates are auto-paired with their margin of error and flagged LOW RELIABILITY above CV 30%; suppression sentinels are decoded to text. ACS 1-year (acs/acs1) only covers areas of 65,000+ people; use acs/acs5 for smaller geographies. Required: dataset, year, get (variables or group), and one of for/ucgid.`
 
 export class FetchAggregateDataTool extends BaseTool<TableArgs> {
   name = 'fetch-aggregate-data'
