@@ -125,27 +125,26 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
     })
   })
 
-  describe('lead-with-caveats and prose reminders', () => {
-    it('leads with SINGLE-UNIT CLAIM and repeats it as a prose reminder', () => {
+  describe('lead-with-caveats (single mention, no trailing duplication)', () => {
+    it('leads with SINGLE-UNIT CLAIM before the records', () => {
       const out = formatAggregateResponse(baseInput())
       expect(out).toContain('**SINGLE-UNIT CLAIM:**')
       // Caveat sits before records.
       expect(out.indexOf('**SINGLE-UNIT CLAIM:**')).toBeLessThan(
         out.indexOf('Record 1:'),
       )
-      // Prose reminder after the records.
-      expect(out).toMatch(/\(Reminder: .*single-geography response.*\)/i)
+      // GPT-5.1 holds a lead caveat: no trailing prose-reminder duplication.
+      expect(out).not.toMatch(/\(Reminder:/)
     })
 
-    it('LOW RELIABILITY caveat fires in the ## Caveats section AND in the prose reminder', () => {
+    it('LOW RELIABILITY caveat fires once in the ## Caveats section', () => {
       const out = formatAggregateResponse(
         baseInput({
           rows: [['Test Tract', '1000', '600', '02']],
         }),
       )
-      // High-impact phrasing in both lead and trailing reminder.
       expect(out).toContain('LOW RELIABILITY')
-      expect(out).toMatch(/\(Reminder: .*LOW RELIABILITY.*\)/i)
+      expect(out).not.toMatch(/\(Reminder:/)
     })
 
     it('emits the SUPPRESSED VALUES caveat when a sentinel is hit', () => {
@@ -156,8 +155,8 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
       )
       expect(out).toContain('**SUPPRESSED VALUES:**')
       expect(out).toContain('NOT_APPLICABLE')
-      // Critical caveat repeated as a prose reminder.
-      expect(out).toMatch(/\(Reminder:.*suppression sentinel.*\)/i)
+      // No trailing prose-reminder duplication.
+      expect(out).not.toMatch(/\(Reminder:/)
       // Sentinel itself never leaks through.
       expect(out).not.toMatch(/-666666666/)
     })

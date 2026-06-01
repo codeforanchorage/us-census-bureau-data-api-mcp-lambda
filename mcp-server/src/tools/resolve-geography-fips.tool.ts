@@ -12,7 +12,7 @@ import { GeographySearchResultRow } from '../types/geography.types.js'
 import { SummaryLevelRow } from '../types/summary-level.types.js'
 import { ToolContent } from '../types/base.types.js'
 
-export const toolDescription = `Call this to convert any place name into Census FIPS codes; never guess FIPS digits from memory. Accepts a natural-language geography_name (e.g. "Philadelphia", "Cook County") and an optional summary_level filter. Returns FIPS codes and ready-to-use for/in query strings for fetch-aggregate-data, plus available vintages and parent-geography hierarchy.`
+export const toolDescription = `Call this to convert a place name into Census FIPS codes; never guess FIPS digits. Accepts a natural-language geography_name (e.g. "Philadelphia", "Cook County") and an optional summary_level filter. Returns FIPS codes, for/in query strings for fetch-aggregate-data, available vintages, and parent-geography hierarchy.`
 export class ResolveGeographyFipsTool extends BaseTool<ResolveGeographyFipsArgs> {
   name = 'resolve-geography-fips'
   description = toolDescription

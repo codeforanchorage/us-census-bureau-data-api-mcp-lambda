@@ -14,7 +14,7 @@ import { BaseTool } from './base.tool.js'
 
 import { ToolContent } from '../types/base.types.js'
 
-export const toolDescription = `Call this FIRST when the user asks for Census data but has not named a specific dataset; do not guess the dataset_id. Returns the full Census Bureau catalog of dataset IDs, titles, and available vintages so you can pick the right one. Workflow: list-datasets -> search-data-tables -> fetch-dataset-geography -> resolve-geography-fips -> fetch-aggregate-data.`
+export const toolDescription = `Call this FIRST when the user asks for Census data but has not named a dataset; do not guess the dataset_id. Returns the full Census catalog of dataset IDs, titles, and available vintages. Workflow: list-datasets -> search-data-tables -> fetch-dataset-geography -> resolve-geography-fips -> fetch-aggregate-data.`
 
 // Module-level cache — persists across warm Lambda invocations so repeated
 // calls don't refetch Census's ~2MB data.json catalog every time.
