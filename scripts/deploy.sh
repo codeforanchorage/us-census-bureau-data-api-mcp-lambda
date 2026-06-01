@@ -102,29 +102,65 @@ rm -f "$ZIP_FILE"
 
 node - "$ZIP_FILE" "$PACKAGE_DIR" <<'JS'
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { execSync } = require('child_process');
 
-// Use PowerShell's Compress-Archive when the `zip` binary is absent (Windows).
-// Otherwise fall back to `zip -r`.
 const zipPath = path.resolve(process.argv[2]);
 const dir = path.resolve(process.argv[3]);
 
-function hasZip() {
+function has(cmd) {
   try {
-    execSync(process.platform === 'win32' ? 'where zip' : 'which zip', { stdio: 'ignore' });
+    execSync(`${process.platform === 'win32' ? 'where' : 'which'} ${cmd}`, { stdio: 'ignore' });
     return true;
   } catch {
     return false;
   }
 }
 
-if (hasZip()) {
-  execSync(`zip -r "${zipPath}" .`, { cwd: dir, stdio: 'inherit' });
+if (has('zip')) {
+  // -X drops extra file attributes; zip stores entries with forward slashes.
+  execSync(`zip -rX "${zipPath}" .`, { cwd: dir, stdio: 'inherit' });
+} else if (process.platform === 'win32') {
+  // Windows PowerShell 5.1's Compress-Archive writes BACKSLASH path separators,
+  // which AWS Lambda's Linux runtime cannot resolve (the handler fails to load).
+  // Build the zip via .NET ZipArchive and normalize every entry name to forward
+  // slashes. [char]92 = '\', [char]47 = '/' (kept as codes to avoid escaping).
+  const ps = [
+    "$ErrorActionPreference = 'Stop'",
+    '$bs = [char]92; $fs = [char]47',
+    'Add-Type -AssemblyName System.IO.Compression',
+    'Add-Type -AssemblyName System.IO.Compression.FileSystem',
+    '$zipPath = $args[0]; $dir = $args[1]',
+    'if (Test-Path $zipPath) { Remove-Item $zipPath -Force }',
+    'Push-Location $dir',
+    'try {',
+    "  $zip = [System.IO.Compression.ZipFile]::Open($zipPath, 'Create')",
+    '  try {',
+    '    Get-ChildItem -Recurse -File | ForEach-Object {',
+    "      $rel = (Resolve-Path -Relative $_.FullName).TrimStart('.').TrimStart($bs, $fs).Replace($bs, $fs)",
+    '      [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $rel, [System.IO.Compression.CompressionLevel]::Optimal)',
+    '    }',
+    '  } finally { $zip.Dispose() }',
+    '} finally { Pop-Location }',
+  ].join('\n');
+  // Write to the temp dir, NOT the package dir -- a .ps1 inside `dir` would be
+  // swept into the zip.
+  const tmp = path.join(os.tmpdir(), `lambda-zip-${process.pid}.ps1`);
+  fs.writeFileSync(tmp, ps);
+  try {
+    execSync(
+      `powershell -NoProfile -ExecutionPolicy Bypass -File "${tmp}" "${zipPath}" "${dir}"`,
+      { stdio: 'inherit' },
+    );
+  } finally {
+    fs.unlinkSync(tmp);
+  }
 } else {
-  // Fall back to PowerShell Compress-Archive
-  const cmd = `Compress-Archive -Path * -DestinationPath "${zipPath}" -Force`;
-  execSync(`powershell -NoProfile -Command "${cmd}"`, { cwd: dir, stdio: 'inherit' });
+  throw new Error(
+    "Cannot package: the 'zip' binary is not installed. Install it " +
+      "(e.g. 'sudo apt-get install zip' or 'brew install zip') and re-run.",
+  );
 }
 
 console.log(`Wrote ${zipPath} (${(fs.statSync(zipPath).size / 1024 / 1024).toFixed(1)} MB)`);
