@@ -26,15 +26,8 @@ import {
   isStaleVintage,
   vintageBannerParts,
 } from './dataset-info.js'
-import {
-  getSentinelInfo,
-  isSentinel,
-  decodeSentinel,
-} from './sentinels.js'
-import {
-  VariablesIndex,
-  labelForCell,
-} from './variables-cache.js'
+import { getSentinelInfo, isSentinel, decodeSentinel } from './sentinels.js'
+import { VariablesIndex, labelForCell } from './variables-cache.js'
 
 export interface FormatInput {
   dataset: string
@@ -52,10 +45,15 @@ export interface FormatInput {
   // Threshold for CV-based LOW RELIABILITY flag. 0.30 is the standard
   // "use with caution" line.
   cvFlagThreshold?: number
+  // Cap on rendered Record blocks. Wildcard geography queries (e.g. every
+  // tract in a state) can return thousands of rows, which would blow out the
+  // consuming model's context.
+  maxRecords?: number
 }
 
 // CV = (MOE / 1.645) / estimate. Above this is the "do not use precisely" zone.
 const DEFAULT_CV_THRESHOLD = 0.3
+const DEFAULT_MAX_RECORDS = 100
 // Treat data as a geography-row when one of these column headers appears.
 const GEO_LEVEL_COLUMNS = new Set([
   'us',
@@ -91,18 +89,33 @@ export function formatAggregateResponse(input: FormatInput): string {
     variablesIndex,
     currentYear,
     cvFlagThreshold = DEFAULT_CV_THRESHOLD,
+    maxRecords = DEFAULT_MAX_RECORDS,
   } = input
+
+  const totalRecords = rows.length
+  const truncated = totalRecords > maxRecords
+  const visibleRows = truncated ? rows.slice(0, maxRecords) : rows
 
   const decoded = decodeRows({
     headers,
-    rows,
+    rows: visibleRows,
     variablesIndex,
     cvFlagThreshold,
   })
 
   const caveats: string[] = []
 
-  // Reliability flags first (the most specific, highest-leverage caveat).
+  // Truncation first -- every downstream claim depends on knowing the
+  // response is partial. Reliability flags below cover shown records only.
+  if (truncated) {
+    caveats.push(
+      `**TRUNCATED:** the query returned ${totalRecords} records; showing the first ${maxRecords}. ` +
+        `Do not compute totals or rankings from this partial list. Narrow the geography ` +
+        `(for/in/ucgid) and re-run to get a complete result.`,
+    )
+  }
+
+  // Reliability flags next (the most specific, highest-leverage caveat).
   for (const flag of decoded.reliabilityFlags) {
     caveats.push(flag)
   }
@@ -153,6 +166,14 @@ export function formatAggregateResponse(input: FormatInput): string {
   provenance.push(buildCitation(url))
   provenance.push(`Retrieved: ${new Date().toISOString()}`)
   sections.push(provenance.join('\n'))
+
+  // Truncation notice, not caveat duplication: mirrors the trailing
+  // "(Reminder: ...)" lines in resolve-geography-fips and search-data-tables.
+  if (truncated) {
+    sections.push(
+      `(Reminder: only the first ${maxRecords} of ${totalRecords} records are shown above.)`,
+    )
+  }
 
   return sections.join('\n\n')
 }

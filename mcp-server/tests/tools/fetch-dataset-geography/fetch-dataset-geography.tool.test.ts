@@ -275,6 +275,7 @@ describe('FetchDatasetGeographyTool', () => {
         expect.stringContaining(
           'https://api.census.gov/data/timeseries/asm/area2012/geography.json?key=',
         ),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       )
     })
   })

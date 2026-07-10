@@ -9,6 +9,7 @@ import {
   labelForCell,
   prettyLabel,
   suggestCellCodes,
+  suggestGroupCodes,
 } from '../../src/helpers/variables-cache'
 
 const variablesJson = {
@@ -50,7 +51,9 @@ describe('fetchVariablesIndex', () => {
     mockFetch.mockReturnValueOnce(mockResponse(variablesJson))
     const idx = await fetchVariablesIndex('acs/acs5', 2019, 'KEY')
     expect(idx).not.toBeNull()
-    expect(idx!.byName.get('B25001_001E')?.label).toContain('Total housing units')
+    expect(idx!.byName.get('B25001_001E')?.label).toContain(
+      'Total housing units',
+    )
   })
 
   it('pairs every _E estimate with its _M margin of error when present', async () => {
@@ -94,6 +97,26 @@ describe('labelForCell + prettyLabel', () => {
     expect(prettyLabel('Estimate!!Total!!Occupied housing units')).toBe(
       'Total / Occupied housing units',
     )
+  })
+})
+
+describe('groupNames + suggestGroupCodes', () => {
+  it('collects group codes and excludes the "N/A" placeholder', async () => {
+    mockFetch.mockReturnValueOnce(mockResponse(variablesJson))
+    const idx = await fetchVariablesIndex('acs/acs5', 2019, 'KEY')
+    expect(idx!.groupNames.has('B25001')).toBe(true)
+    expect(idx!.groupNames.has('B25003')).toBe(true)
+    expect(idx!.groupNames.has('N/A')).toBe(false)
+  })
+
+  it('suggests near-miss group codes for typos', async () => {
+    mockFetch.mockReturnValueOnce(mockResponse(variablesJson))
+    const idx = await fetchVariablesIndex('acs/acs5', 2019, 'KEY')
+    expect(suggestGroupCodes(idx, 'B25002')).toContain('B25001')
+  })
+
+  it('returns empty when no index is available', () => {
+    expect(suggestGroupCodes(null, 'B25001')).toEqual([])
   })
 })
 

@@ -5,6 +5,8 @@
 // (_E) vs MOEs (_M), and lets us validate cell codes before forwarding to
 // the API. Cached per (dataset, vintage) -- one fetch per session is enough.
 
+import { fetchWithTimeout } from './http.js'
+
 export interface VariableMeta {
   name: string
   label?: string
@@ -21,6 +23,9 @@ export interface VariablesIndex {
   byName: Map<string, VariableMeta>
   // List of estimate variable names -- used for "did you mean" suggestions.
   estimateNames: string[]
+  // Group codes (table IDs) present in this dataset's catalog -- used to
+  // validate get.group requests before forwarding to the API.
+  groupNames: Set<string>
 }
 
 interface RawVariableEntry {
@@ -68,15 +73,15 @@ async function loadIndex(
   year: number | string,
   apiKey?: string,
 ): Promise<VariablesIndex | null> {
-  const fetch = (await import('node-fetch')).default
   const base = `https://api.census.gov/data/${year}/${dataset}/variables.json`
   const url = apiKey ? `${base}?key=${apiKey}` : base
-  const res = await fetch(url)
+  const res = await fetchWithTimeout(url)
   if (!res.ok) return null
   const data = (await res.json()) as RawVariablesResponse
   if (!data || typeof data !== 'object' || !data.variables) return null
 
   const byName = new Map<string, VariableMeta>()
+  const groupNames = new Set<string>()
   for (const [name, entry] of Object.entries(data.variables)) {
     if (!entry || typeof entry !== 'object') continue
     byName.set(name, {
@@ -87,6 +92,8 @@ async function loadIndex(
       group: entry.group,
       attributes: entry.attributes,
     })
+    // "N/A" is Census's placeholder for ungrouped variables like NAME.
+    if (entry.group && entry.group !== 'N/A') groupNames.add(entry.group)
   }
 
   // Pair each estimate (suffix E) with its margin of error (suffix M).
@@ -102,7 +109,7 @@ async function loadIndex(
     }
   }
 
-  return { byName, estimateNames }
+  return { byName, estimateNames, groupNames }
 }
 
 // Best-effort label lookup. Returns a string like "B25001_001E (Total housing
@@ -120,7 +127,10 @@ export function labelForCell(
 }
 
 export function prettyLabel(label: string): string {
-  return label.replace(/^Estimate!!/, '').replace(/!!/g, ' / ').trim()
+  return label
+    .replace(/^Estimate!!/, '')
+    .replace(/!!/g, ' / ')
+    .trim()
 }
 
 // Returns suggestions for a likely-typo cell code. Uses a simple
@@ -155,6 +165,24 @@ export function suggestCellCodes(
   return candidates.slice(0, max).map((c) => c.name)
 }
 
+// Returns suggestions for a likely-typo group (table) code, e.g.
+// B25001X -> B25001. Same Levenshtein approach as suggestCellCodes.
+export function suggestGroupCodes(
+  index: VariablesIndex | null,
+  group: string,
+  max = 3,
+): string[] {
+  if (!index) return []
+  const upper = group.toUpperCase()
+  const candidates: { name: string; score: number }[] = []
+  for (const name of index.groupNames) {
+    const score = levenshtein(upper, name.toUpperCase())
+    if (score <= 3) candidates.push({ name, score })
+  }
+  candidates.sort((a, b) => a.score - b.score || a.name.localeCompare(b.name))
+  return candidates.slice(0, max).map((c) => c.name)
+}
+
 function levenshtein(a: string, b: string): number {
   if (a === b) return 0
   const m = a.length
@@ -168,11 +196,7 @@ function levenshtein(a: string, b: string): number {
     curr[0] = i
     for (let j = 1; j <= n; j++) {
       const cost = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1
-      curr[j] = Math.min(
-        prev[j] + 1,
-        curr[j - 1] + 1,
-        prev[j - 1] + cost,
-      )
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
     }
     ;[prev, curr] = [curr, prev]
   }

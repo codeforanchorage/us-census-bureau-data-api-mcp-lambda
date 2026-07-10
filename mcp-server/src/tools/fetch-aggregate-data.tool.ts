@@ -2,10 +2,12 @@ import { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 
 import { BaseTool } from './base.tool.js'
+import { fetchWithTimeout } from '../helpers/http.js'
 import { formatAggregateResponse } from '../helpers/response-format.js'
 import {
   fetchVariablesIndex,
   suggestCellCodes,
+  suggestGroupCodes,
   VariablesIndex,
 } from '../helpers/variables-cache.js'
 import {
@@ -20,7 +22,7 @@ import {
   validateGeographyArgs,
 } from '../schema/validators.js'
 
-export const toolDescription = `Fetches Census statistics for a dataset, vintage, and geography. Never guess cell codes -- run search-data-tables first. ACS estimates are auto-paired with their margin of error and flagged LOW RELIABILITY above CV 30%; suppression sentinels are decoded to text. ACS 1-year (acs/acs1) only covers areas of 65,000+ people; use acs/acs5 for smaller geographies. Required: dataset, year, get (variables or group), and one of for/ucgid.`
+export const toolDescription = `Fetches Census statistics for a dataset, vintage, and geography. Never guess cell codes -- run search-data-tables first. ACS estimates are auto-paired with their margin of error and flagged LOW RELIABILITY above CV 30%; suppression sentinels are decoded to text. ACS 1-year (acs/acs1) only covers areas of 65,000+ people; use acs/acs5 for smaller geographies. Responses are capped at 100 records; narrow wildcard geographies for complete lists. Required: dataset, year, get (variables or group), and one of for/ucgid.`
 
 export class FetchAggregateDataTool extends BaseTool<TableArgs> {
   name = 'fetch-aggregate-data'
@@ -95,6 +97,22 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
       }
     }
 
+    // Validate the requested group (table) code the same way. A typo'd group
+    // otherwise becomes an opaque 400 from the API.
+    if (variablesIndex && requestedGroup) {
+      if (!variablesIndex.groupNames.has(requestedGroup)) {
+        const suggestions = suggestGroupCodes(variablesIndex, requestedGroup)
+        const hint =
+          suggestions.length > 0
+            ? ` -- did you mean ${suggestions.join(', ')}?`
+            : ''
+        return this.createErrorResponse(
+          `Unknown group code "${requestedGroup}" for ${args.dataset} ${args.year}${hint}\n\n` +
+            `Use search-data-tables to discover the correct table ID before calling fetch-aggregate-data.`,
+        )
+      }
+    }
+
     // Auto-pair every requested estimate with its MOE companion. The
     // companion already-present case is a no-op via the Set dedupe.
     const autoAddedMoeFields: string[] = []
@@ -140,8 +158,7 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
     const url = `${baseUrl}?${query.toString()}`
 
     try {
-      const fetch = (await import('node-fetch')).default
-      const res = await fetch(url)
+      const res = await fetchWithTimeout(url)
 
       console.log(`URL Attempted: ${url.replace(/key=[^&]*/g, 'key=REDACTED')}`)
 
@@ -155,7 +172,34 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
         )
       }
 
-      const data = (await res.json()) as string[][]
+      // The Census API signals "valid query, zero matching data" with a 204
+      // (or occasionally a 200 with an empty body) rather than an empty array.
+      const bodyText = await res.text()
+      if (res.status === 204 || bodyText.trim() === '') {
+        return this.createErrorResponse(
+          `The Census API returned no data for this query (HTTP ${res.status} with an empty body). ` +
+            `The query was accepted but matched nothing. Re-verify the geography (for/in/ucgid) via ` +
+            `resolve-geography-fips and that the variables are published for ${args.dataset} ${args.year} ` +
+            `via search-data-tables.`,
+        )
+      }
+
+      let data: string[][]
+      try {
+        data = JSON.parse(bodyText) as string[][]
+      } catch {
+        return this.createErrorResponse(
+          `The Census API returned a non-JSON response body. Retry after a short delay; ` +
+            `if the failure persists the Census Data API may be having an outage.`,
+        )
+      }
+      if (!Array.isArray(data) || data.length === 0) {
+        return this.createErrorResponse(
+          `The Census API returned an empty result set for this query. Re-verify the geography ` +
+            `(for/in/ucgid) via resolve-geography-fips and the variables via search-data-tables.`,
+        )
+      }
+
       const [headers, ...rows] = data
 
       const queryEcho = buildQueryEcho({

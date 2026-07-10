@@ -20,7 +20,10 @@ function findNonAscii(s: string): string[] {
 }
 
 function makeIndex(): VariablesIndex {
-  const byName = new Map<string, { name: string; label?: string; moePair?: string }>([
+  const byName = new Map<
+    string,
+    { name: string; label?: string; moePair?: string }
+  >([
     [
       'B25001_001E',
       {
@@ -35,10 +38,16 @@ function makeIndex(): VariablesIndex {
     ],
     ['NAME', { name: 'NAME', label: 'Geographic Area Name' }],
   ])
-  return { byName, estimateNames: ['B25001_001E'] }
+  return {
+    byName,
+    estimateNames: ['B25001_001E'],
+    groupNames: new Set(['B25001']),
+  }
 }
 
-function baseInput(overrides: Partial<Parameters<typeof formatAggregateResponse>[0]> = {}) {
+function baseInput(
+  overrides: Partial<Parameters<typeof formatAggregateResponse>[0]> = {},
+) {
   return {
     dataset: 'acs/acs5',
     year: 2022,
@@ -71,7 +80,9 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
   describe('section headers', () => {
     it('uses ## Source, ## Query, ## Records, ## Provenance sections', () => {
       const out = formatAggregateResponse(baseInput())
-      expect(out).toMatch(/^## Caveats[\s\S]*## Source[\s\S]*## Query[\s\S]*## Records[\s\S]*## Provenance/m)
+      expect(out).toMatch(
+        /^## Caveats[\s\S]*## Source[\s\S]*## Query[\s\S]*## Records[\s\S]*## Provenance/m,
+      )
     })
 
     it('keeps Source after Caveats so the caveats lead', () => {
@@ -171,11 +182,52 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
     })
   })
 
+  describe('record cap', () => {
+    function manyRows(n: number): string[][] {
+      return Array.from({ length: n }, (_, i) => [
+        `Place ${i + 1}`,
+        '300000',
+        '1500',
+        '02',
+      ])
+    }
+
+    it('caps rendered records at 100 by default with a leading TRUNCATED caveat', () => {
+      const out = formatAggregateResponse(baseInput({ rows: manyRows(250) }))
+      expect(out).toContain('**TRUNCATED:**')
+      expect(out).toContain('returned 250 records')
+      expect(out).toContain('Record 100:')
+      expect(out).not.toContain('Record 101:')
+      // Truncation caveat leads the caveats section, before any records.
+      expect(out.indexOf('**TRUNCATED:**')).toBeLessThan(
+        out.indexOf('Record 1:'),
+      )
+      // Trailing truncation notice (a notice, not caveat duplication).
+      expect(out).toContain(
+        '(Reminder: only the first 100 of 250 records are shown above.)',
+      )
+    })
+
+    it('honors a custom maxRecords', () => {
+      const out = formatAggregateResponse(
+        baseInput({ rows: manyRows(5), maxRecords: 3 }),
+      )
+      expect(out).toContain('Record 3:')
+      expect(out).not.toContain('Record 4:')
+      expect(out).toContain('**TRUNCATED:**')
+    })
+
+    it('does not emit TRUNCATED when the row count is under the cap', () => {
+      const out = formatAggregateResponse(baseInput({ rows: manyRows(100) }))
+      expect(out).not.toContain('**TRUNCATED:**')
+      expect(out).toContain('Record 100:')
+      expect(out).not.toMatch(/\(Reminder:/)
+    })
+  })
+
   describe('provenance + freshness', () => {
     it('Source section spells out the ACS 5-year collection window', () => {
-      const out = formatAggregateResponse(
-        baseInput({ year: 2019 }),
-      )
+      const out = formatAggregateResponse(baseInput({ year: 2019 }))
       expect(out).toContain('ACS 5-Year Estimates, 2019')
       expect(out).toContain('data collected 2015-2019')
     })
