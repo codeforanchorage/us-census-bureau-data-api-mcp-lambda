@@ -2,6 +2,7 @@ import { Tool } from '@modelcontextprotocol/sdk/types.js'
 
 import { BaseTool } from './base.tool.js'
 import { DatabaseService } from '../services/database.service.js'
+import { fetchWithTimeout } from '../helpers/http.js'
 import {
   FetchDatasetGeographyArgs,
   FetchDatasetGeographyArgsSchema,
@@ -192,7 +193,6 @@ export class FetchDatasetGeographyTool extends BaseTool<FetchDatasetGeographyArg
       // Get geography levels from database
       const geographyLevels = await this.getSummaryLevels()
 
-      const fetch = (await import('node-fetch')).default
       let year = ''
       if (args.year) {
         year = `${args.year}/`
@@ -201,7 +201,7 @@ export class FetchDatasetGeographyTool extends BaseTool<FetchDatasetGeographyArg
       const baseUrl = `https://api.census.gov/data/${year}${args.dataset}/geography.json`
       const geographyUrl = `${baseUrl}?key=${apiKey}`
 
-      const geographyResponse = await fetch(geographyUrl)
+      const geographyResponse = await fetchWithTimeout(geographyUrl)
 
       if (geographyResponse.ok) {
         const geographyData = await geographyResponse.json()

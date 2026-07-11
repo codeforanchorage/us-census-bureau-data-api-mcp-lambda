@@ -7,6 +7,7 @@ vi.mock('node-fetch', () => ({
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
+  clearCatalogCache,
   ListDatasetsTool,
   toolDescription,
 } from '../../../src/tools/list-datasets.tool'
@@ -23,6 +24,9 @@ describe('ListDatasetsTool', () => {
     tool = new ListDatasetsTool()
 
     mockFetch.mockClear()
+    // The catalog cache is module-level so it survives across tests in this
+    // file; clear it so each test exercises a real fetch.
+    clearCatalogCache()
 
     delete process.env.CENSUS_API_KEY
   })
@@ -81,7 +85,7 @@ describe('ListDatasetsTool', () => {
       expect(result.content[0]).toEqual({
         type: 'text',
         text: expect.stringContaining(
-          'Catalog response did not match expected metadata schema',
+          'Catalog response did not match the expected metadata schema',
         ),
       })
 

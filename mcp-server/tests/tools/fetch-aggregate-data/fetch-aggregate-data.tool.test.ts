@@ -190,7 +190,9 @@ describe('FetchAggregateDataTool', () => {
       const dataCalls = mockFetch.mock.calls.filter(
         (c) => !String(c[0]).includes('/variables.json'),
       )
-      expect(dataCalls[0][0]).toContain('https://api.census.gov/data/2022/acs/acs1')
+      expect(dataCalls[0][0]).toContain(
+        'https://api.census.gov/data/2022/acs/acs1',
+      )
       expect(dataCalls[0][0]).toContain('get=group%28B01001%29')
     })
 
@@ -309,6 +311,38 @@ describe('FetchAggregateDataTool', () => {
       expect(text).not.toMatch(/-666666666/)
     })
 
+    it('rejects unknown group codes with a "did you mean" hint', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/variables.json')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(VARIABLES_FIXTURE), { status: 200 }),
+          )
+        }
+        // Should never be called -- validation should intercept.
+        return Promise.resolve(new Response('[]', { status: 200 }))
+      })
+
+      const args = {
+        dataset: 'acs/acs5',
+        year: 2022,
+        get: { group: 'B01002' },
+        for: 'state:02',
+      }
+
+      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
+      const text = response.content[0].text as string
+      expect(text).toContain('Unknown group code')
+      expect(text).toContain('did you mean')
+      expect(text).toContain('B01001')
+      expect(text).toContain('search-data-tables')
+
+      // Confirm we didn't actually hit the data endpoint.
+      const dataCalls = mockFetch.mock.calls.filter(
+        (c) => !String(c[0]).includes('/variables.json'),
+      )
+      expect(dataCalls.length).toBe(0)
+    })
+
     it('rejects unknown cell codes with a "did you mean" hint', async () => {
       mockFetch.mockImplementation((url: string) => {
         if (url.includes('/variables.json')) {
@@ -408,6 +442,77 @@ describe('FetchAggregateDataTool', () => {
       const text = response.content[0].text as string
       expect(text).toContain('65,000')
       expect(text).toContain('acs/acs5')
+    })
+
+    it('explains a 204 No Content as "matched no data" rather than a JSON parse failure', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/variables.json')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(VARIABLES_FIXTURE), { status: 200 }),
+          )
+        }
+        return Promise.resolve(new Response(null, { status: 204 }))
+      })
+
+      const args = {
+        dataset: 'acs/acs1',
+        year: 2022,
+        get: { group: 'B01001' },
+        for: 'state:01',
+      }
+
+      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
+      const text = response.content[0].text as string
+      expect(text).toContain('no data')
+      expect(text).toContain('resolve-geography-fips')
+      expect(text).not.toContain('Fetch failed')
+    })
+
+    it('treats a 200 with an empty body the same as a 204', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/variables.json')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(VARIABLES_FIXTURE), { status: 200 }),
+          )
+        }
+        return Promise.resolve(new Response('', { status: 200 }))
+      })
+
+      const args = {
+        dataset: 'acs/acs1',
+        year: 2022,
+        get: { group: 'B01001' },
+        for: 'state:01',
+      }
+
+      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
+      const text = response.content[0].text as string
+      expect(text).toContain('no data')
+      expect(text).not.toContain('Fetch failed')
+    })
+
+    it('reports a non-JSON body as a Census API problem, not a crash', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/variables.json')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(VARIABLES_FIXTURE), { status: 200 }),
+          )
+        }
+        return Promise.resolve(
+          new Response('<html>Service Unavailable</html>', { status: 200 }),
+        )
+      })
+
+      const args = {
+        dataset: 'acs/acs1',
+        year: 2022,
+        get: { group: 'B01001' },
+        for: 'state:01',
+      }
+
+      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
+      const text = response.content[0].text as string
+      expect(text).toContain('non-JSON')
     })
 
     it('should handle network errors', async () => {

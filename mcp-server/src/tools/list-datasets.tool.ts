@@ -12,6 +12,7 @@ import {
 
 import { BaseTool } from './base.tool.js'
 
+import { fetchWithTimeout } from '../helpers/http.js'
 import { ToolContent } from '../types/base.types.js'
 
 export const toolDescription = `Call this FIRST when the user asks for Census data but has not named a dataset; do not guess the dataset_id. Returns the full Census catalog of dataset IDs, titles, and available vintages. Workflow: list-datasets -> search-data-tables -> fetch-dataset-geography -> resolve-geography-fips -> fetch-aggregate-data.`
@@ -20,6 +21,11 @@ export const toolDescription = `Call this FIRST when the user asks for Census da
 // calls don't refetch Census's ~2MB data.json catalog every time.
 const CATALOG_TTL_MS = 60 * 60 * 1000
 let catalogCache: { json: string; expiresAt: number } | null = null
+
+// Test hook, mirroring clearVariablesCache in variables-cache.ts.
+export function clearCatalogCache(): void {
+  catalogCache = null
+}
 
 export class ListDatasetsTool extends BaseTool<object> {
   name = 'list-datasets'
@@ -146,10 +152,10 @@ export class ListDatasetsTool extends BaseTool<object> {
     }
 
     try {
-      const fetch = (await import('node-fetch')).default
       const catalogUrl = `https://api.census.gov/data.json?key=${apiKey}`
 
-      const response = await fetch(catalogUrl)
+      // The full catalog is ~2MB, so allow longer than the default timeout.
+      const response = await fetchWithTimeout(catalogUrl, 20_000)
       if (!response.ok) {
         return this.createErrorResponse(
           `Census catalog returned ${response.status} ${response.statusText}. Retry after a short delay; if the failure persists the Census Data API may be unavailable.`,

@@ -33,7 +33,9 @@ export default defineConfig({
               singleThread: false,
             },
           },
-          globalSetup: ['./tests/globalSetup.ts'],
+          // No globalSetup here: every unit test mocks pg/DatabaseService, so
+          // the unit project runs without Docker or a database. Only the
+          // integration project needs the docker-compose test database.
           setupFiles: ['./tests/setup.ts'],
         },
       },
