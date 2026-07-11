@@ -100,6 +100,35 @@ describe('labelForCell + prettyLabel', () => {
   })
 })
 
+describe('attribute-only variables (live-catalog shape)', () => {
+  // Mirrors the real acs/acs5 2023 catalog: NAME and the _M/_EA/_MA
+  // companions are NOT top-level entries; they only appear in `attributes`.
+  const attributeOnlyJson = {
+    variables: {
+      GEO_ID: { label: 'Geography', group: 'N/A', attributes: 'NAME' },
+      B01003_001E: {
+        label: 'Estimate!!Total',
+        group: 'B01003',
+        attributes: 'B01003_001EA,B01003_001M,B01003_001MA',
+      },
+    },
+  }
+
+  it('indexes attribute names so validation accepts NAME and annotations', async () => {
+    mockFetch.mockReturnValueOnce(mockResponse(attributeOnlyJson))
+    const idx = await fetchVariablesIndex('acs/acs5', 2023, 'KEY')
+    expect(idx!.byName.has('NAME')).toBe(true)
+    expect(idx!.byName.has('B01003_001EA')).toBe(true)
+    expect(idx!.byName.has('B01003_001MA')).toBe(true)
+  })
+
+  it('pairs the MOE companion even when it only exists as an attribute', async () => {
+    mockFetch.mockReturnValueOnce(mockResponse(attributeOnlyJson))
+    const idx = await fetchVariablesIndex('acs/acs5', 2023, 'KEY')
+    expect(idx!.byName.get('B01003_001E')?.moePair).toBe('B01003_001M')
+  })
+})
+
 describe('groupNames + suggestGroupCodes', () => {
   it('collects group codes and excludes the "N/A" placeholder', async () => {
     mockFetch.mockReturnValueOnce(mockResponse(variablesJson))

@@ -96,6 +96,21 @@ async function loadIndex(
     if (entry.group && entry.group !== 'N/A') groupNames.add(entry.group)
   }
 
+  // In recent vintages (e.g. acs/acs5 2023) Census does NOT list NAME, the
+  // _M margins of error, or the _EA/_MA annotations as top-level variables;
+  // they only appear as comma-separated `attributes` of another variable
+  // (NAME under GEO_ID, the companions under their estimate). Index them too,
+  // or cell-code validation rejects NAME and MOE pairing never finds the _M.
+  for (const meta of Array.from(byName.values())) {
+    if (!meta.attributes) continue
+    for (const raw of meta.attributes.split(',')) {
+      const attr = raw.trim()
+      if (attr && !byName.has(attr)) {
+        byName.set(attr, { name: attr })
+      }
+    }
+  }
+
   // Pair each estimate (suffix E) with its margin of error (suffix M).
   // ACS variables use the convention BXXXXX_NNNE / BXXXXX_NNNM consistently.
   const estimateNames: string[] = []
