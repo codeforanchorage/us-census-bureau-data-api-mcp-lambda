@@ -311,6 +311,53 @@ describe('FetchAggregateDataTool', () => {
       expect(text).not.toMatch(/-666666666/)
     })
 
+    it('accepts NAME and pairs the MOE when both exist only as attributes (live acs5-2023 shape)', async () => {
+      // The real acs/acs5 2023 catalog omits NAME and the _M companions as
+      // top-level variables; they only appear in `attributes`. Regression
+      // test for the live bug where NAME was rejected as an unknown code.
+      const liveShapeFixture = {
+        variables: {
+          GEO_ID: { label: 'Geography', group: 'N/A', attributes: 'NAME' },
+          B01003_001E: {
+            label: 'Estimate!!Total',
+            group: 'B01003',
+            attributes: 'B01003_001EA,B01003_001M,B01003_001MA',
+          },
+        },
+      }
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/variables.json')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(liveShapeFixture), { status: 200 }),
+          )
+        }
+        const data = [
+          ['NAME', 'B01003_001E', 'B01003_001M', 'state'],
+          ['Alaska', '733406', '0', '02'],
+        ]
+        return Promise.resolve(
+          new Response(JSON.stringify(data), { status: 200 }),
+        )
+      })
+
+      const args = {
+        dataset: 'acs/acs5',
+        year: 2023,
+        get: { variables: ['NAME', 'B01003_001E'] },
+        for: 'state:02',
+      }
+
+      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
+      const text = response.content[0].text as string
+      expect(text).not.toContain('Unknown cell code')
+
+      const dataCall = mockFetch.mock.calls.find(
+        (c) => !String(c[0]).includes('/variables.json'),
+      )!
+      expect(decodeURIComponent(dataCall[0])).toContain('B01003_001M')
+      expect(text).toContain('**MOE AUTO-PAIRED:**')
+    })
+
     it('rejects unknown group codes with a "did you mean" hint', async () => {
       mockFetch.mockImplementation((url: string) => {
         if (url.includes('/variables.json')) {
