@@ -22,6 +22,11 @@ export const toolDescription = `Call this FIRST when the user asks for Census da
 const CATALOG_TTL_MS = 60 * 60 * 1000
 let catalogCache: { json: string; expiresAt: number } | null = null
 
+// Test hook, mirroring clearVariablesCache in variables-cache.ts.
+export function clearCatalogCache(): void {
+  catalogCache = null
+}
+
 export class ListDatasetsTool extends BaseTool<object> {
   name = 'list-datasets'
   description = toolDescription

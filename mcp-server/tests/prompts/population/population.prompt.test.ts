@@ -49,7 +49,7 @@ describe('Population Prompt', () => {
       const result = await prompt.handler({ geography_name: testGeography })
 
       expect(prompt.createPromptResponse).toHaveBeenCalledWith(
-        `What’s the population of ${testGeography}?`,
+        `What's the population of ${testGeography}?`,
         `Get the most recent population data for ${testGeography} using the Census MCP Server. Start by using the resolve-geography-fips tool to identify the correct geography.`,
       )
 
@@ -70,7 +70,7 @@ describe('Population Prompt', () => {
         await prompt.handler({ geography_name: geography })
 
         expect(prompt.createPromptResponse).toHaveBeenCalledWith(
-          `What’s the population of ${geography}?`,
+          `What's the population of ${geography}?`,
           `Get the most recent population data for ${geography} using the Census MCP Server. Start by using the resolve-geography-fips tool to identify the correct geography.`,
         )
       }
