@@ -50,36 +50,12 @@ resource "aws_budgets_budget" "monthly" {
 }
 
 # ── Cost anomaly detection ───────────────────────────────────────────────────
-
-resource "aws_ce_anomaly_monitor" "services" {
-  count = local.alerts_enabled ? 1 : 0
-
-  name              = "${local.lambda_name}-service-monitor"
-  monitor_type      = "DIMENSIONAL"
-  monitor_dimension = "SERVICE"
-}
-
-resource "aws_ce_anomaly_subscription" "daily_email" {
-  count = local.alerts_enabled ? 1 : 0
-
-  name             = "${local.lambda_name}-anomaly-alerts"
-  frequency        = "DAILY"
-  monitor_arn_list = [aws_ce_anomaly_monitor.services[0].arn]
-
-  subscriber {
-    type    = "EMAIL"
-    address = var.alert_email
-  }
-
-  # Only alert on anomalies with at least $10 of total impact.
-  threshold_expression {
-    dimension {
-      key           = "ANOMALY_TOTAL_IMPACT_ABSOLUTE"
-      match_options = ["GREATER_THAN_OR_EQUAL"]
-      values        = ["10"]
-    }
-  }
-}
+# NOT managed here. AWS permits one service-dimensional anomaly monitor per
+# account, and this account already carries a fleet-level one
+# ("aws-services-monitor") with a confirmed daily email subscription
+# ("mcp-cost-anomaly-alerts", >= $10 impact) that covers this stack. Managing
+# it from this workspace would let a `terraform destroy` of census alone tear
+# down fleet-wide alerting.
 
 # ── CloudWatch alarms → SNS → email ─────────────────────────────────────────
 
