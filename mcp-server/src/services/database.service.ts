@@ -1,4 +1,6 @@
 import 'dotenv/config'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { Client, Pool, PoolClient, PoolConfig } from 'pg'
 
 type QueryParam = string | number | boolean | null | Date | Buffer
@@ -30,9 +32,20 @@ export class DatabaseService {
     }
 
     if (isLambda) {
-      // RDS uses an AWS-managed CA. rejectUnauthorized: false accepts it
-      // without bundling the cert; upgrade to true + bundled CA later.
-      poolConfig.ssl = { rejectUnauthorized: false }
+      // The RDS instance is publicly accessible, so the TLS peer must be
+      // verified — an unvalidated cert leaves the master password open to
+      // MITM. The AWS RDS CA bundle ships in the deployment zip at certs/
+      // (see scripts/deploy.sh); fail closed if it's missing.
+      poolConfig.ssl = {
+        rejectUnauthorized: true,
+        ca: readFileSync(
+          join(
+            process.env.LAMBDA_TASK_ROOT ?? process.cwd(),
+            'certs/rds-global-bundle.pem',
+          ),
+          'utf8',
+        ),
+      }
     }
 
     this.pool = new Pool(poolConfig)

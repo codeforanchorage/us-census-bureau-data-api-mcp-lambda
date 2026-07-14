@@ -88,6 +88,8 @@ rm -rf "$PACKAGE_DIR"
 mkdir -p "$PACKAGE_DIR"
 
 cp -r mcp-server/dist "$PACKAGE_DIR/dist"
+# RDS CA bundle: database.service.ts fails closed if this is missing.
+cp -r mcp-server/certs "$PACKAGE_DIR/certs"
 cp mcp-server/package.json "$PACKAGE_DIR/"
 cp mcp-server/package-lock.json "$PACKAGE_DIR/"
 
