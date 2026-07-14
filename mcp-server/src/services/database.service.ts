@@ -3,7 +3,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { Client, Pool, PoolClient, PoolConfig } from 'pg'
 
-type QueryParam = string | number | boolean | null | Date | Buffer
+type QueryParam = string | number | boolean | null | Date | Buffer | string[]
 
 const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME
 

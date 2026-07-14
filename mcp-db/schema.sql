@@ -33,6 +33,20 @@ COMMENT ON EXTENSION pg_trgm IS 'text similarity measurement and index searching
 
 
 --
+-- Name: pgcrypto; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION pgcrypto; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions';
+
+
+--
 -- Name: uuid-ossp; Type: EXTENSION; Schema: -; Owner: -
 --
 
@@ -66,16 +80,16 @@ CREATE FUNCTION public.cleanup_expired_cache() RETURNS integer
 
 
 --
--- Name: generate_cache_hash(text, integer, text[], jsonb); Type: FUNCTION; Schema: public; Owner: -
+-- Name: generate_cache_hash(text, text, integer, text[], jsonb); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.generate_cache_hash(dataset_code text, year integer, variables text[], geography_spec jsonb) RETURNS text
+CREATE FUNCTION public.generate_cache_hash(dataset_param text, "group" text, year integer, variables text[], geography_spec jsonb) RETURNS text
     LANGUAGE plpgsql IMMUTABLE
     AS $$
     BEGIN
         RETURN encode(
             digest(
-                dataset_code || year::TEXT || array_to_string(variables, ',') || geography_spec::TEXT,
+                dataset_param || COALESCE("group", '') || year::TEXT || array_to_string(variables, ',') || geography_spec::TEXT,
                 'sha256'
             ),
             'hex'
