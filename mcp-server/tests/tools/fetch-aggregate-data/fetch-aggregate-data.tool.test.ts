@@ -4,7 +4,20 @@ vi.mock('node-fetch', () => ({
   default: mockFetch,
 }))
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+vi.mock('../../../src/services/queryCache.service', async () => {
+  const actual = await vi.importActual<
+    typeof import('../../../src/services/queryCache.service')
+  >('../../../src/services/queryCache.service')
+  return {
+    ...actual,
+    QueryCacheService: {
+      getInstance: vi.fn(),
+    },
+  }
+})
+
+import { describe, it, expect, beforeEach, afterEach, vi, Mock } from 'vitest'
+import { QueryCacheService } from '../../../src/services/queryCache.service'
 import { buildCitation } from '../../../src/helpers/citation'
 import { clearVariablesCache } from '../../../src/helpers/variables-cache'
 import {
@@ -65,8 +78,15 @@ function mockDefaultVariablesFetch() {
 
 describe('FetchAggregateDataTool', () => {
   let tool: FetchAggregateDataTool
+  let mockCacheService: { get: Mock; set: Mock }
 
   beforeEach(() => {
+    mockCacheService = {
+      get: vi.fn().mockResolvedValue(null),
+      set: vi.fn().mockResolvedValue(undefined),
+    }
+    ;(QueryCacheService.getInstance as Mock).mockReturnValue(mockCacheService)
+
     tool = new FetchAggregateDataTool()
     mockFetch.mockClear()
     clearVariablesCache()
@@ -581,6 +601,100 @@ describe('FetchAggregateDataTool', () => {
       const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
       validateResponseStructure(response)
       expect(response.content[0].text).toContain('Fetch failed: Network error')
+    })
+  })
+
+  describe('response caching', () => {
+    it('serves a cache hit without calling the Census data endpoint', async () => {
+      mockDefaultVariablesFetch()
+      mockCacheService.get.mockResolvedValueOnce([
+        ['NAME', 'B01001_001E', 'B01001_001M', 'state'],
+        ['Cached State', '500000', '250', '02'],
+      ])
+
+      const response = await tool.toolHandler(
+        {
+          dataset: 'acs/acs1',
+          year: 2022,
+          get: { variables: ['B01001_001E'] },
+          for: 'state:02',
+        },
+        process.env.CENSUS_API_KEY,
+      )
+
+      const text = response.content[0].text as string
+      expect(text).toContain('Cached State')
+      expect(mockCacheService.set).not.toHaveBeenCalled()
+
+      const dataCalls = mockFetch.mock.calls.filter(
+        ([url]) => !String(url).includes('/variables.json'),
+      )
+      expect(dataCalls).toHaveLength(0)
+    })
+
+    it('writes the cache after a fetch, keyed on MOE-paired variables and the full geography spec', async () => {
+      mockDefaultVariablesFetch()
+
+      await tool.toolHandler(
+        {
+          dataset: 'acs/acs1',
+          year: 2022,
+          get: { variables: ['B01001_001E'] },
+          ucgid: '0400000US02',
+          predicates: { NAICS2017: '23' },
+          descriptive: true,
+        },
+        process.env.CENSUS_API_KEY,
+      )
+
+      expect(mockCacheService.set).toHaveBeenCalledTimes(1)
+      const [cacheKey] = mockCacheService.set.mock.calls[0]
+      // Auto-added MOE companion is part of the key so hit === miss payloads.
+      expect(cacheKey.variables).toEqual(['B01001_001E', 'B01001_001M'])
+      expect(cacheKey.group).toBeNull()
+      const spec = JSON.parse(cacheKey.geographySpec)
+      expect(spec.ucgid).toBe('0400000US02')
+      expect(spec.predicates).toEqual({ NAICS2017: '23' })
+      expect(spec.descriptive).toBe('true')
+    })
+
+    it('falls through to the API when the cache read fails', async () => {
+      mockDefaultVariablesFetch()
+      mockCacheService.get.mockRejectedValueOnce(new Error('db down'))
+
+      const response = await tool.toolHandler(
+        {
+          dataset: 'acs/acs1',
+          year: 2022,
+          get: { group: 'B01001' },
+          for: 'state:01',
+        },
+        process.env.CENSUS_API_KEY,
+      )
+
+      validateResponseStructure(response)
+      const dataCalls = mockFetch.mock.calls.filter(
+        ([url]) => !String(url).includes('/variables.json'),
+      )
+      expect(dataCalls).toHaveLength(1)
+    })
+
+    it('still returns data when the cache write fails', async () => {
+      mockDefaultVariablesFetch()
+      mockCacheService.set.mockRejectedValueOnce(new Error('write refused'))
+
+      const response = await tool.toolHandler(
+        {
+          dataset: 'acs/acs1',
+          year: 2022,
+          get: { group: 'B01001' },
+          for: 'state:01',
+        },
+        process.env.CENSUS_API_KEY,
+      )
+
+      validateResponseStructure(response)
+      expect(response.content[0].text).toContain('acs/acs1')
     })
   })
 })

@@ -5,6 +5,11 @@ import { BaseTool } from './base.tool.js'
 import { fetchWithTimeout } from '../helpers/http.js'
 import { formatAggregateResponse } from '../helpers/response-format.js'
 import {
+  CacheDuration,
+  CacheDurationUnit,
+  QueryCacheService,
+} from '../services/queryCache.service.js'
+import {
   fetchVariablesIndex,
   suggestCellCodes,
   suggestGroupCodes,
@@ -47,9 +52,14 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
     })
   }
 
+  private cacheService: QueryCacheService
+  // Published vintages are immutable, so a long TTL is safe.
+  private cacheDuration = new CacheDuration(1, CacheDurationUnit.YEAR)
+
   constructor() {
     super()
     this.handler = this.handler.bind(this)
+    this.cacheService = QueryCacheService.getInstance()
   }
 
   validateArgs(input: unknown) {
@@ -157,47 +167,86 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
 
     const url = `${baseUrl}?${query.toString()}`
 
+    // Everything that changes the API response must be part of the cache key:
+    // ucgid, predicates, and descriptive all do. The variables are the
+    // effective (MOE-paired) list so hit and miss return identical payloads.
+    const cacheParams = {
+      dataset: args.dataset,
+      group: requestedGroup ?? null,
+      year: args.year,
+      variables: effectiveVariables,
+      geographySpec: JSON.stringify({
+        for: args.for ?? null,
+        in: args.in ?? null,
+        ucgid: args.ucgid ?? null,
+        predicates: args.predicates ?? null,
+        descriptive,
+      }),
+    }
+
+    // Cache infrastructure problems must never fail the query path.
+    let data: string[][] | null = null
     try {
-      const res = await fetchWithTimeout(url)
+      data = await this.cacheService.get(cacheParams)
+    } catch (err) {
+      console.error(`Cache read failed: ${(err as Error).message}`)
+    }
 
-      console.log(`URL Attempted: ${url.replace(/key=[^&]*/g, 'key=REDACTED')}`)
+    try {
+      if (data) {
+        console.log(`Cache hit for ${args.dataset} ${args.year}`)
+      } else {
+        const res = await fetchWithTimeout(url)
 
-      if (!res.ok) {
-        return this.createErrorResponse(
-          buildApiErrorMessage(res.status, res.statusText, {
-            dataset: args.dataset,
-            year: args.year,
-            variablesAvailable: variablesIndex !== null,
-          }),
+        console.log(
+          `URL Attempted: ${url.replace(/key=[^&]*/g, 'key=REDACTED')}`,
         )
-      }
 
-      // The Census API signals "valid query, zero matching data" with a 204
-      // (or occasionally a 200 with an empty body) rather than an empty array.
-      const bodyText = await res.text()
-      if (res.status === 204 || bodyText.trim() === '') {
-        return this.createErrorResponse(
-          `The Census API returned no data for this query (HTTP ${res.status} with an empty body). ` +
-            `The query was accepted but matched nothing. Re-verify the geography (for/in/ucgid) via ` +
-            `resolve-geography-fips and that the variables are published for ${args.dataset} ${args.year} ` +
-            `via search-data-tables.`,
-        )
-      }
+        if (!res.ok) {
+          return this.createErrorResponse(
+            buildApiErrorMessage(res.status, res.statusText, {
+              dataset: args.dataset,
+              year: args.year,
+              variablesAvailable: variablesIndex !== null,
+            }),
+          )
+        }
 
-      let data: string[][]
-      try {
-        data = JSON.parse(bodyText) as string[][]
-      } catch {
-        return this.createErrorResponse(
-          `The Census API returned a non-JSON response body. Retry after a short delay; ` +
-            `if the failure persists the Census Data API may be having an outage.`,
-        )
-      }
-      if (!Array.isArray(data) || data.length === 0) {
-        return this.createErrorResponse(
-          `The Census API returned an empty result set for this query. Re-verify the geography ` +
-            `(for/in/ucgid) via resolve-geography-fips and the variables via search-data-tables.`,
-        )
+        // The Census API signals "valid query, zero matching data" with a 204
+        // (or occasionally a 200 with an empty body) rather than an empty array.
+        const bodyText = await res.text()
+        if (res.status === 204 || bodyText.trim() === '') {
+          return this.createErrorResponse(
+            `The Census API returned no data for this query (HTTP ${res.status} with an empty body). ` +
+              `The query was accepted but matched nothing. Re-verify the geography (for/in/ucgid) via ` +
+              `resolve-geography-fips and that the variables are published for ${args.dataset} ${args.year} ` +
+              `via search-data-tables.`,
+          )
+        }
+
+        try {
+          data = JSON.parse(bodyText) as string[][]
+        } catch {
+          return this.createErrorResponse(
+            `The Census API returned a non-JSON response body. Retry after a short delay; ` +
+              `if the failure persists the Census Data API may be having an outage.`,
+          )
+        }
+        if (!Array.isArray(data) || data.length === 0) {
+          return this.createErrorResponse(
+            `The Census API returned an empty result set for this query. Re-verify the geography ` +
+              `(for/in/ucgid) via resolve-geography-fips and the variables via search-data-tables.`,
+          )
+        }
+
+        // Awaited, unlike upstream's fire-and-forget: Lambda freezes the
+        // container as soon as the response returns, which would strand or
+        // lose a background write. The insert is a single fast statement.
+        try {
+          await this.cacheService.set(cacheParams, data, this.cacheDuration)
+        } catch (err) {
+          console.error(`Cache write failed: ${(err as Error).message}`)
+        }
       }
 
       const [headers, ...rows] = data
