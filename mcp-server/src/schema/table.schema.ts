@@ -84,10 +84,39 @@ export const geoProperties = {
 const geographyPatternFor: RegExp = /^[a-zA-Z+\s]+:[*\d,]+$/
 const geographyPatternIn: RegExp = /^[a-zA-Z]+:[*\d,]+(?:\+[a-zA-Z]+:[*\d,]+)*$/
 
+// Query parameters the tools set themselves. Letting predicates smuggle
+// these in would override the API key or bypass the for/ucgid validation.
+const RESERVED_PREDICATE_KEYS = new Set([
+  'get',
+  'for',
+  'in',
+  'ucgid',
+  'key',
+  'descriptive',
+])
+
+export const predicatesSchema = z
+  .record(z.string(), z.string())
+  .superRefine((predicates, ctx) => {
+    for (const key of Object.keys(predicates)) {
+      if (RESERVED_PREDICATE_KEYS.has(key.toLowerCase())) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `"${key}" is a reserved query parameter and cannot be passed via predicates; use the dedicated argument instead.`,
+        })
+      } else if (!/^[A-Za-z0-9_]+$/.test(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Invalid predicate key "${key}": only letters, digits, and underscores are allowed.`,
+        })
+      }
+    }
+  })
+
 export const baseFields = {
   dataset: z.string(),
   descriptive: z.boolean().optional(),
-  predicates: z.record(z.string(), z.string()).optional(),
+  predicates: predicatesSchema.optional(),
 }
 
 export const yearField = {

@@ -125,7 +125,7 @@ variable "enable_waf" {
 }
 
 variable "waf_rate_limit" {
-  description = "WAF per-IP rate limit: maximum requests from one IP in any 5-minute window before it is blocked."
+  description = "WAF per-IP rate limit: maximum requests from one IP in any 5-minute window before it is blocked. Keep this generous — claude.ai and M365 Copilot funnel ALL their users through a small set of shared egress IPs, so a per-user-sized limit here blocks every user of those platforms at once. The stage throttle (api_rate_limit) remains the aggregate ceiling."
   type        = number
-  default     = 300
+  default     = 2000
 }

@@ -1,9 +1,14 @@
-lambda_name                 = "census-mcp-prod"
-stage_name                  = "prod"
-aws_region                  = "us-west-2"
+lambda_name = "census-mcp-prod"
+stage_name  = "prod"
+aws_region  = "us-west-2"
+# lambda_timeout: API Gateway REST hard-cuts at 29s, so anything past 30s is
+# billed compute the client never sees (worst legitimate path is ~21s).
+# lambda_reserved_concurrency: sized above api_rate_limit x avg duration so
+# the gateway throttles (clean 429) before Lambda does (5xx); 40 containers
+# x pool max 2 = 80 connections, under the db.t4g.micro ~87 ceiling.
 lambda_memory               = 1024
-lambda_timeout              = 60
-lambda_reserved_concurrency = 20
+lambda_timeout              = 30
+lambda_reserved_concurrency = 40
 
 # NOTE: api_quota_limit is only enforced for requests carrying an API key;
 # this endpoint is keyless, so the real ceiling is api_rate_limit. At 1 GB /

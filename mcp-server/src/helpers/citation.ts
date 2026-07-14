@@ -1,10 +1,7 @@
 export function buildCitation(url: string): string {
-  const apiKey = process.env.CENSUS_API_KEY
-
-  if (!apiKey) {
-    return `Source: U.S. Census Bureau Data API (${url})`
-  }
-
-  const urlWithoutAPIKey = url.replaceAll(`key=${apiKey}`, 'key=REDACTED')
+  // Redact by pattern, not by matching the configured key's exact value:
+  // value-matching silently leaks the live key whenever the URL encodes it
+  // differently than the env var (or the env var is missing entirely).
+  const urlWithoutAPIKey = url.replace(/([?&])key=[^&]*/g, '$1key=REDACTED')
   return `Source: U.S. Census Bureau Data API (${urlWithoutAPIKey})`
 }
