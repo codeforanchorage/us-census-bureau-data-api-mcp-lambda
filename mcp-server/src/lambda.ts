@@ -1,5 +1,13 @@
 process.env.DEBUG_LOGS = process.env.DEBUG_LOGS ?? 'true'
 
+if (process.env.DEBUG_LOGS !== 'true') {
+  console.log = () => {}
+  console.info = () => {}
+  console.warn = () => {}
+}
+
+import { randomUUID } from 'node:crypto'
+
 import {
   SecretsManagerClient,
   GetSecretValueCommand,
@@ -149,6 +157,54 @@ function jsonResponse(
   }
 }
 
+// One JSON line per request, consumed by the mcp-fleet-usage CloudWatch
+// dashboard (Logs Insights fields: mcp_session_id, jsonrpc_method,
+// jsonrpc_params.name, jsonrpc_params.clientInfo.name). Written straight to
+// stdout so it flows even when DEBUG_LOGS is off. Never include tool
+// arguments here — they can contain user query content.
+function logUsage(
+  sessionId: string | undefined,
+  method: string,
+  params: unknown,
+): void {
+  const { name, clientInfo } = (params ?? {}) as {
+    name?: unknown
+    clientInfo?: { name?: unknown; version?: unknown }
+  }
+
+  process.stdout.write(
+    `${JSON.stringify({
+      mcp_session_id: sessionId,
+      jsonrpc_method: method,
+      jsonrpc_params: {
+        ...(typeof name === 'string' ? { name } : {}),
+        ...(clientInfo
+          ? {
+              clientInfo: {
+                name: clientInfo.name,
+                version: clientInfo.version,
+              },
+            }
+          : {}),
+      },
+    })}\n`,
+  )
+}
+
+function getSessionId(
+  event: LambdaEvent,
+  method: string | undefined,
+): string | undefined {
+  const fromHeader = Object.entries(event.headers ?? {}).find(
+    ([name]) => name.toLowerCase() === 'mcp-session-id',
+  )?.[1]
+
+  // Streamable HTTP: the server assigns a session id at initialization (via
+  // the mcp-session-id response header) and clients echo it on every
+  // subsequent request.
+  return fromHeader ?? (method === 'initialize' ? randomUUID() : undefined)
+}
+
 function errorResponse(
   id: string | number | null | undefined,
   code: number,
@@ -267,9 +323,18 @@ export async function handler(event: LambdaEvent): Promise<LambdaResponse> {
     return errorResponse(null, -32700, 'Parse error: invalid JSON')
   }
 
+  const sessionId = getSessionId(event, parsed.method)
+  if (parsed.method) {
+    logUsage(sessionId, parsed.method, parsed.params)
+  }
+
   try {
     const server = await getServer()
-    return await dispatch(server, parsed)
+    const response = await dispatch(server, parsed)
+    if (sessionId) {
+      response.headers['mcp-session-id'] = sessionId
+    }
+    return response
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return errorResponse(
