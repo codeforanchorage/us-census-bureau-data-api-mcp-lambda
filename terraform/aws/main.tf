@@ -77,7 +77,7 @@ resource "aws_lambda_function" "mcp_server" {
     variables = {
       DB_SECRET_ARN = aws_secretsmanager_secret.db.arn
       NODE_ENV      = "production"
-      DEBUG_LOGS    = "true"
+      DEBUG_LOGS    = var.debug_logs ? "true" : "false"
     }
   }
 

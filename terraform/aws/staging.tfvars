@@ -9,3 +9,7 @@ api_rate_limit              = 5
 api_burst_limit             = 10
 db_instance_class           = "db.t4g.micro"
 db_allocated_storage        = 20
+
+# Verbose logging is fine in staging; keep alert_email/enable_waf unset here
+# so account-wide cost alerting lives only in the prod workspace.
+debug_logs = true

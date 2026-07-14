@@ -28,8 +28,8 @@ resource "aws_acm_certificate" "api" {
 # ── API Gateway Custom Domain ───────────────────────────────────────────────
 
 resource "aws_api_gateway_domain_name" "custom" {
-  count           = var.custom_domain != "" ? 1 : 0
-  domain_name     = var.custom_domain
+  count                    = var.custom_domain != "" ? 1 : 0
+  domain_name              = var.custom_domain
   regional_certificate_arn = aws_acm_certificate.api[0].arn
 
   endpoint_configuration {

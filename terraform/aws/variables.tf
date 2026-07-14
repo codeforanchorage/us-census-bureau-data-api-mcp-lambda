@@ -93,3 +93,39 @@ variable "db_engine_version" {
   type        = string
   default     = "16.13"
 }
+
+variable "debug_logs" {
+  description = "Enable verbose Lambda logging (DEBUG_LOGS env var). Keep off in prod: log ingestion is $0.50/GB and verbose logs are the largest discretionary cost under load."
+  type        = bool
+  default     = false
+}
+
+variable "alert_email" {
+  description = "Email address for budget alerts, cost anomaly alerts, and CloudWatch alarms. Leave empty to skip creating all cost-alerting resources (budget, anomaly monitor, SNS topic, alarms)."
+  type        = string
+  default     = ""
+}
+
+variable "monthly_budget_limit" {
+  description = "Monthly account cost budget in USD. Alerts fire at 50% and 100% actual and 150% forecasted."
+  type        = number
+  default     = 50
+}
+
+variable "daily_request_alarm_threshold" {
+  description = "Alarm when API Gateway requests in a single day exceed this count (early warning that traffic is far above normal)."
+  type        = number
+  default     = 50000
+}
+
+variable "enable_waf" {
+  description = "Attach a WAF web ACL with a per-IP rate limit to the API Gateway stage. Costs ~$6/mo fixed + $0.60 per million requests; prevents a single client from consuming the entire stage throttle."
+  type        = bool
+  default     = false
+}
+
+variable "waf_rate_limit" {
+  description = "WAF per-IP rate limit: maximum requests from one IP in any 5-minute window before it is blocked."
+  type        = number
+  default     = 300
+}
