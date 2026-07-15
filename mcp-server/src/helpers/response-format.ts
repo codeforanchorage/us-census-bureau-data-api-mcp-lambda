@@ -12,7 +12,11 @@
 //     sees so it can't get summarised away.
 //   - "## Section" headers, not just **bold**, so the structure survives
 //     Copilot's renderer.
-//   - Records are numbered blocks ("Record 1:") rather than tables.
+//   - Small results render as numbered blocks ("Record 1:") rather than
+//     markdown tables. Above COMPACT_FORMAT_THRESHOLD records the blocks
+//     cost several times more tokens than the data they carry, so large
+//     results switch to a compact delimited table inside a code fence
+//     (a fence survives both renderers; a markdown table does not).
 //   - ASCII only -- "--" instead of em-dash, "+/-" instead of plus-or-minus
 //     -- because Copilot rendering paths occasionally drop non-ASCII.
 // We previously repeated each critical caveat as a trailing prose reminder
@@ -27,7 +31,7 @@ import {
   vintageBannerParts,
 } from './dataset-info.js'
 import { getSentinelInfo, isSentinel, decodeSentinel } from './sentinels.js'
-import { VariablesIndex, labelForCell } from './variables-cache.js'
+import { VariablesIndex, labelForCell, prettyLabel } from './variables-cache.js'
 
 export interface FormatInput {
   dataset: string
@@ -49,11 +53,15 @@ export interface FormatInput {
   // tract in a state) can return thousands of rows, which would blow out the
   // consuming model's context.
   maxRecords?: number
+  // Above this many rendered records, switch from "Record N:" blocks to the
+  // compact delimited-table format.
+  compactThreshold?: number
 }
 
 // CV = (MOE / 1.645) / estimate. Above this is the "do not use precisely" zone.
 const DEFAULT_CV_THRESHOLD = 0.3
 const DEFAULT_MAX_RECORDS = 100
+const COMPACT_FORMAT_THRESHOLD = 20
 // Treat data as a geography-row when one of these column headers appears.
 const GEO_LEVEL_COLUMNS = new Set([
   'us',
@@ -90,6 +98,7 @@ export function formatAggregateResponse(input: FormatInput): string {
     currentYear,
     cvFlagThreshold = DEFAULT_CV_THRESHOLD,
     maxRecords = DEFAULT_MAX_RECORDS,
+    compactThreshold = COMPACT_FORMAT_THRESHOLD,
   } = input
 
   const totalRecords = rows.length
@@ -101,6 +110,7 @@ export function formatAggregateResponse(input: FormatInput): string {
     rows: visibleRows,
     variablesIndex,
     cvFlagThreshold,
+    compact: visibleRows.length > compactThreshold,
   })
 
   const caveats: string[] = []
@@ -214,6 +224,7 @@ function decodeRows(opts: {
   rows: string[][]
   variablesIndex: VariablesIndex | null
   cvFlagThreshold: number
+  compact?: boolean
 }): DecodeResult {
   const { headers, rows, variablesIndex, cvFlagThreshold } = opts
 
@@ -226,6 +237,16 @@ function decodeRows(opts: {
       const moeIdx = headers.indexOf(expectedMoe)
       if (moeIdx >= 0) moeIndexByEstimate.set(i, moeIdx)
     }
+  }
+
+  if (opts.compact) {
+    return renderCompactTable({
+      headers,
+      rows,
+      variablesIndex,
+      cvFlagThreshold,
+      moeIndexByEstimate,
+    })
   }
 
   // Decode header line once.
@@ -280,6 +301,123 @@ function decodeRows(opts: {
     geographyRowCount,
     sentinelHitCount,
   }
+}
+
+// Compact rendering for large results: one delimited line per record inside
+// a code fence, MOE merged into its estimate's cell, labels factored out
+// into a one-time column legend. Reliability flags are aggregated into a
+// single caveat here -- per-cell caveat lines would defeat the purpose.
+function renderCompactTable(opts: {
+  headers: string[]
+  rows: string[][]
+  variablesIndex: VariablesIndex | null
+  cvFlagThreshold: number
+  moeIndexByEstimate: Map<number, number>
+}): DecodeResult {
+  const { headers, rows, variablesIndex, cvFlagThreshold, moeIndexByEstimate } =
+    opts
+  const mergedMoeColumns = new Set(moeIndexByEstimate.values())
+
+  const headerCells: string[] = []
+  const legend: string[] = []
+  for (let i = 0; i < headers.length; i++) {
+    if (mergedMoeColumns.has(i)) continue
+    const h = headers[i]
+    headerCells.push(moeIndexByEstimate.has(i) ? `${h} (+/- MOE)` : h)
+    const label = variablesIndex?.byName.get(h)?.label
+    if (label && !GEO_LEVEL_COLUMNS.has(h.toLowerCase()) && h !== 'NAME') {
+      legend.push(`  ${h} = ${prettyLabel(label)}`)
+    }
+  }
+
+  let lowReliabilityCount = 0
+  let sentinelHitCount = 0
+  const tableLines: string[] = [headerCells.join(' | ')]
+
+  for (const row of rows) {
+    const cells: string[] = []
+    for (let i = 0; i < headers.length; i++) {
+      if (mergedMoeColumns.has(i)) continue
+      const raw = row[i]
+
+      if (moeIndexByEstimate.has(i)) {
+        const moeRaw = row[moeIndexByEstimate.get(i)!]
+        if (isSentinel(raw) || isSentinel(moeRaw)) sentinelHitCount++
+        cells.push(
+          renderCompactEstimate(raw, moeRaw, cvFlagThreshold, () => {
+            lowReliabilityCount++
+          }),
+        )
+        continue
+      }
+
+      const sentinel = getSentinelInfo(raw)
+      if (sentinel) {
+        sentinelHitCount++
+        cells.push(sentinel.short)
+        continue
+      }
+      cells.push(raw ?? '')
+    }
+    tableLines.push(cells.join(' | '))
+  }
+
+  const reliabilityFlags: string[] = []
+  if (lowReliabilityCount > 0) {
+    reliabilityFlags.push(
+      `**LOW RELIABILITY:** ${lowReliabilityCount} estimate value(s) in the shown records have ` +
+        `CV above ${Math.round(cvFlagThreshold * 100)}% -- flagged inline as [LOW CV=..%]. ` +
+        `Treat those cells as MOE bands, not point estimates.`,
+    )
+  }
+
+  const parts: string[] = [
+    `${rows.length} records in compact table format. Columns are delimited by " | "; ` +
+      `estimate columns are shown as "estimate +/- MOE" (90% CI).`,
+  ]
+  if (legend.length > 0) {
+    parts.push(`Columns:\n${legend.join('\n')}`)
+  }
+  parts.push('```\n' + tableLines.join('\n') + '\n```')
+
+  return {
+    rendered: parts.join('\n\n'),
+    reliabilityFlags,
+    geographyRowCount: rows.length,
+    sentinelHitCount,
+  }
+}
+
+// Compact-cell twin of renderEstimateWithMoe: same sentinel and CV logic,
+// but returns just the cell text and reports low reliability via callback
+// so the caller can aggregate instead of emitting one caveat per cell.
+function renderCompactEstimate(
+  estimateRaw: string,
+  moeRaw: string,
+  cvFlagThreshold: number,
+  onLowReliability: () => void,
+): string {
+  const estSentinel = getSentinelInfo(estimateRaw)
+  if (estSentinel) return estSentinel.short
+
+  const estimate = Number(estimateRaw)
+  if (!Number.isFinite(estimate)) return estimateRaw ?? ''
+
+  const moeSentinel = getSentinelInfo(moeRaw)
+  if (moeSentinel) return `${formatNumber(estimate)} +/- ${moeSentinel.short}`
+
+  const moe = Number(moeRaw)
+  if (!Number.isFinite(moe) || estimate === 0) {
+    return `${formatNumber(estimate)} +/- ${moeRaw}`
+  }
+
+  const cv = moe / 1.645 / Math.abs(estimate)
+  let suffix = ''
+  if (cv > cvFlagThreshold) {
+    suffix = ` [LOW CV=${Math.round(cv * 100)}%]`
+    onLowReliability()
+  }
+  return `${formatNumber(estimate)} +/- ${formatNumber(moe)}${suffix}`
 }
 
 function renderEstimateWithMoe(opts: {

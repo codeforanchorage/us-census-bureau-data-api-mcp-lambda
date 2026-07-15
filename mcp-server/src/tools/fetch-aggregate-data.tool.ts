@@ -27,7 +27,10 @@ import {
   validateGeographyArgs,
 } from '../schema/validators.js'
 
-export const toolDescription = `Fetches Census statistics for a dataset, vintage, and geography. Never guess cell codes -- run search-data-tables first. ACS estimates are auto-paired with their margin of error and flagged LOW RELIABILITY above CV 30%; suppression sentinels are decoded to text. ACS 1-year (acs/acs1) only covers areas of 65,000+ people; use acs/acs5 for smaller geographies. Responses are capped at 100 records; narrow wildcard geographies for complete lists. Required: dataset, year, get (variables or group), and one of for/ucgid.`
+export const toolDescription = `Fetches Census statistics for a dataset, vintage, and geography. Never guess cell codes -- run search-data-tables first. ACS estimates are auto-paired with their margin of error and flagged LOW RELIABILITY above CV 30%; suppression sentinels are decoded to text. MOE pairing doubles the variable count against the Census 50-variable cap, so pass at most 25 variables per call for ACS datasets (group requests are exempt). ACS 1-year (acs/acs1) only covers areas of 65,000+ people; use acs/acs5 for smaller geographies. Responses show at most 100 records -- truncation is display-side, the full result is still fetched upstream -- so narrow wildcard geographies; unbounded national wildcards for high-cardinality levels (e.g. for=county:* with no in=) are rejected. Required: dataset, year, get (variables or group), and one of for/ucgid.`
+
+// Census Data API hard limit on explicit get= variables per request.
+const CENSUS_VARIABLE_LIMIT = 50
 
 export class FetchAggregateDataTool extends BaseTool<TableArgs> {
   name = 'fetch-aggregate-data'
@@ -70,6 +73,15 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
     args: TableArgs,
     apiKey: string,
   ): Promise<{ content: ToolContent[] }> {
+    // Reject unbounded national wildcards before paying for anything. The
+    // 100-record cap is display-side only -- the full payload is still
+    // fetched from the Census API -- so a nationwide county:*/tract:* call
+    // pays full upstream cost for a result that is mostly cut away.
+    const wildcardError = checkUnboundedWildcard(args.for, args.in)
+    if (wildcardError) {
+      return this.createErrorResponse(wildcardError)
+    }
+
     const baseUrl = `https://api.census.gov/data/${args.year}/${args.dataset}`
 
     // Load variables.json best-effort. Used for cell-code validation, MOE
@@ -139,6 +151,24 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
 
     let getParams = ''
     const effectiveVariables = Array.from(variablesWithMoe)
+
+    // The Census API caps explicit get= variables at 50 per call. group()
+    // requests are exempt -- the group expands server-side (B01001 alone
+    // returns 196 columns). MOE auto-pairing above can double the requested
+    // count, so check the *effective* list here and fail fast with an
+    // accurate message; otherwise Census returns an opaque 400 that reads
+    // as a geography/cell-code problem when neither is at fault.
+    if (effectiveVariables.length > CENSUS_VARIABLE_LIMIT) {
+      return this.createErrorResponse(
+        `Too many variables: ${requestedVariables.length} requested, and MOE auto-pairing added ` +
+          `${autoAddedMoeFields.length} margin-of-error field(s), for an effective total of ` +
+          `${effectiveVariables.length} -- over the Census API limit of ${CENSUS_VARIABLE_LIMIT} variables per call. ` +
+          `For ACS datasets each estimate consumes two slots (estimate + MOE), so request at most 25 ` +
+          `estimate variables per call, split the request across multiple calls, or fetch the whole ` +
+          `table with get.group (group requests are not subject to the 50-variable limit). ` +
+          `The geography and cell codes in this request are not the problem.`,
+      )
+    }
     if (effectiveVariables.length > 0) {
       getParams = effectiveVariables.join(',')
     }
@@ -208,6 +238,12 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
               dataset: args.dataset,
               year: args.year,
               variablesAvailable: variablesIndex !== null,
+              // When the catalog loaded, every explicit variable and group
+              // was already validated above -- an unknown code cannot have
+              // reached the API, so a 400 must have another cause.
+              codesValidated:
+                variablesIndex !== null &&
+                (requestedVariables.length > 0 || requestedGroup !== undefined),
             }),
           )
         }
@@ -281,6 +317,43 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
   }
 }
 
+// Geography levels whose nationwide wildcard is far larger than the
+// 100-record display cap. A for=<level>:* with no in= restriction fetches
+// the whole nation from the Census API only to show the first 100 rows.
+// Levels absent from this map (us, state, region, division, MSA,
+// congressional district, ...) are small enough to allow unbounded.
+const UNBOUNDED_WILDCARD_LEVELS = new Map<string, string>([
+  ['county', '~3,200'],
+  ['county subdivision', '~36,000'],
+  ['place', '~32,000'],
+  ['tract', '~85,000'],
+  ['block group', '~240,000'],
+  ['block', 'millions of'],
+  ['zip code tabulation area', '~33,000'],
+  ['public use microdata area', '~2,400'],
+  ['urban area', '~2,600'],
+])
+
+function checkUnboundedWildcard(
+  forParam?: string,
+  inParam?: string,
+): string | null {
+  if (!forParam || inParam) return null
+  const colonIdx = forParam.indexOf(':')
+  if (colonIdx < 0) return null
+  const level = forParam.slice(0, colonIdx).trim().toLowerCase()
+  const values = forParam.slice(colonIdx + 1).trim()
+  if (values !== '*') return null
+  const approxCount = UNBOUNDED_WILDCARD_LEVELS.get(level)
+  if (!approxCount) return null
+  return (
+    `Unbounded wildcard geography: for=${forParam} with no in= restriction requests every ` +
+    `${level} in the nation (${approxCount} records), but at most 100 records can be shown ` +
+    `-- the rest would be fetched and discarded. Narrow the query: add an in= parent geography ` +
+    `(e.g. in=state:02) or list specific ${level} codes (use resolve-geography-fips to find them).`
+  )
+}
+
 // Builds an actionable error message that pushes the model back toward the
 // discovery tools. Descriptive (not prescriptive): we tell the user to retry
 // via the discovery path rather than handing back a parameter value they
@@ -292,6 +365,7 @@ function buildApiErrorMessage(
     dataset: string
     year: number | string
     variablesAvailable: boolean
+    codesValidated: boolean
   },
 ): string {
   const lines: string[] = []
@@ -319,11 +393,23 @@ function buildApiErrorMessage(
           `See https://www.census.gov/programs-surveys/acs/guidance/estimates.html.`,
       )
     }
-    lines.push(
-      `The Census API rejected the query as malformed.`,
-      `Re-verify the geography (for/in/ucgid) via fetch-dataset-geography and ` +
-        `resolve-geography-fips, and re-verify cell codes via search-data-tables.`,
-    )
+    if (ctx.codesValidated) {
+      // Don't send the caller chasing causes we already ruled out: the cell
+      // codes were checked against this dataset's catalog before the call.
+      lines.push(
+        `The Census API rejected the query as malformed. The requested cell codes were ` +
+          `validated against this dataset's catalog, so they are unlikely to be the cause. ` +
+          `Check the geography combination instead -- some levels require an in= parent or are ` +
+          `not published for this dataset (verify via fetch-dataset-geography and ` +
+          `resolve-geography-fips) -- and check any predicates.`,
+      )
+    } else {
+      lines.push(
+        `The Census API rejected the query as malformed.`,
+        `Re-verify the geography (for/in/ucgid) via fetch-dataset-geography and ` +
+          `resolve-geography-fips, and re-verify cell codes via search-data-tables.`,
+      )
+    }
   } else {
     lines.push(
       `Retry after a short delay; if the failure persists, call list-datasets to confirm the dataset is still published.`,
