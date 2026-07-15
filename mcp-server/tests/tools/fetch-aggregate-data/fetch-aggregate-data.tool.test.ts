@@ -442,6 +442,186 @@ describe('FetchAggregateDataTool', () => {
     })
   })
 
+  describe('variable limit pre-flight', () => {
+    // Catalog with n estimates whose MOE companions exist only as attributes
+    // (the live acs5 shape) so auto-pairing doubles the effective count.
+    function catalogWithEstimates(n: number) {
+      const variables: Record<string, object> = {
+        NAME: { label: 'Geographic Area Name', group: 'N/A' },
+      }
+      for (let i = 1; i <= n; i++) {
+        const code = `B01001_${String(i).padStart(3, '0')}`
+        variables[`${code}E`] = {
+          label: `Estimate!!Var ${i}`,
+          group: 'B01001',
+          attributes: `${code}M`,
+        }
+      }
+      return { variables }
+    }
+
+    function estimateCodes(n: number): string[] {
+      return Array.from(
+        { length: n },
+        (_, i) => `B01001_${String(i + 1).padStart(3, '0')}E`,
+      )
+    }
+
+    function mockFetchWithCatalog(n: number) {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/variables.json')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(catalogWithEstimates(n)), {
+              status: 200,
+            }),
+          )
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify(sampleTableByGroupData), {
+            status: 200,
+          }),
+        )
+      })
+    }
+
+    function dataCalls() {
+      return mockFetch.mock.calls.filter(
+        (c) => !String(c[0]).includes('/variables.json'),
+      )
+    }
+
+    it.each([24, 25])(
+      'allows %i estimate variables (effective count at or under 50)',
+      async (n) => {
+        mockFetchWithCatalog(30)
+
+        const response = await tool.toolHandler(
+          {
+            dataset: 'acs/acs5',
+            year: 2023,
+            get: { variables: estimateCodes(n) },
+            for: 'state:02',
+          },
+          process.env.CENSUS_API_KEY,
+        )
+
+        const text = response.content[0].text as string
+        expect(text).not.toContain('Too many variables')
+        expect(dataCalls()).toHaveLength(1)
+      },
+    )
+
+    it.each([26, 30])(
+      'rejects %i estimate variables client-side, naming the variable count',
+      async (n) => {
+        mockFetchWithCatalog(30)
+
+        const response = await tool.toolHandler(
+          {
+            dataset: 'acs/acs5',
+            year: 2023,
+            get: { variables: estimateCodes(n) },
+            for: 'state:02',
+          },
+          process.env.CENSUS_API_KEY,
+        )
+
+        const text = response.content[0].text as string
+        expect(text).toContain('Too many variables')
+        expect(text).toContain(`${n} requested`)
+        expect(text).toContain(`effective total of ${n * 2}`)
+        expect(text).toContain('at most 25')
+        // The accurate diagnosis: don't send the caller off to re-verify
+        // geography or cell codes that were never the problem.
+        expect(text).not.toContain('resolve-geography-fips')
+        expect(text).not.toContain('re-verify')
+        // Never reaches the Census data endpoint.
+        expect(dataCalls()).toHaveLength(0)
+      },
+    )
+
+    it('does not count group members against the limit (group() is exempt)', async () => {
+      // B01001 has 49 estimates -- far over 25 -- but Census expands
+      // group() server-side, so a group request must pass the pre-flight.
+      mockFetchWithCatalog(49)
+
+      const response = await tool.toolHandler(
+        {
+          dataset: 'acs/acs5',
+          year: 2023,
+          get: { group: 'B01001' },
+          for: 'state:02',
+        },
+        process.env.CENSUS_API_KEY,
+      )
+
+      const text = response.content[0].text as string
+      expect(text).not.toContain('Too many variables')
+      expect(dataCalls()).toHaveLength(1)
+    })
+  })
+
+  describe('unbounded wildcard guard', () => {
+    function allCalls() {
+      return mockFetch.mock.calls
+    }
+
+    it('rejects for=county:* with no in= before any fetch', async () => {
+      mockDefaultVariablesFetch()
+
+      const response = await tool.toolHandler(
+        {
+          dataset: 'acs/acs5',
+          year: 2023,
+          get: { variables: ['B01001_001E'] },
+          for: 'county:*',
+        },
+        process.env.CENSUS_API_KEY,
+      )
+
+      const text = response.content[0].text as string
+      expect(text).toContain('Unbounded wildcard geography')
+      expect(text).toContain('in=')
+      // Guard fires before the variables.json fetch too -- zero upstream cost.
+      expect(allCalls()).toHaveLength(0)
+    })
+
+    it('allows for=county:* when in= narrows it', async () => {
+      mockDefaultVariablesFetch()
+
+      const response = await tool.toolHandler(
+        {
+          dataset: 'acs/acs5',
+          year: 2023,
+          get: { variables: ['B01001_001E'] },
+          for: 'county:*',
+          in: 'state:02',
+        },
+        process.env.CENSUS_API_KEY,
+      )
+
+      const text = response.content[0].text as string
+      expect(text).not.toContain('Unbounded wildcard geography')
+    })
+
+    it('allows small-cardinality wildcards like for=state:* unbounded', async () => {
+      mockDefaultVariablesFetch()
+
+      const response = await tool.toolHandler(
+        {
+          dataset: 'acs/acs5',
+          year: 2023,
+          get: { variables: ['B01001_001E'] },
+          for: 'state:*',
+        },
+        process.env.CENSUS_API_KEY,
+      )
+
+      const text = response.content[0].text as string
+      expect(text).not.toContain('Unbounded wildcard geography')
+    })
+  })
+
   describe('API Response Handling', () => {
     it('should handle successful API response', async () => {
       mockDefaultVariablesFetch()
@@ -509,6 +689,38 @@ describe('FetchAggregateDataTool', () => {
       const text = response.content[0].text as string
       expect(text).toContain('65,000')
       expect(text).toContain('acs/acs5')
+    })
+
+    it('does not blame cell codes on a 400 when they were validated against the catalog', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/variables.json')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(VARIABLES_FIXTURE), { status: 200 }),
+          )
+        }
+        return Promise.resolve(
+          new Response('bad request', {
+            status: 400,
+            statusText: 'Bad Request',
+          }),
+        )
+      })
+
+      const args = {
+        dataset: 'acs/acs5',
+        year: 2022,
+        get: { variables: ['B01001_001E'] },
+        for: 'county:001',
+      }
+
+      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY)
+      const text = response.content[0].text as string
+      expect(text).toContain('400')
+      expect(text).toContain('unlikely to be the cause')
+      // Geography remains a plausible cause and is still suggested...
+      expect(text).toContain('resolve-geography-fips')
+      // ...but re-verifying already-validated cell codes is not.
+      expect(text).not.toContain('search-data-tables')
     })
 
     it('explains a 204 No Content as "matched no data" rather than a JSON parse failure', async () => {

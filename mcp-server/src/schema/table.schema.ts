@@ -38,7 +38,7 @@ export const getProperties = {
         type: 'array',
         items: { type: 'string' },
         description:
-          'The variables (or rows) that should be fetched from a given dataset. A max of 50 variables can be passed.',
+          'The variables (or rows) that should be fetched from a given dataset. A max of 50 variables can be passed. For ACS datasets, margin-of-error fields are auto-paired and count toward that limit, so the effective maximum is 25 estimate variables -- each estimate consumes two slots.',
         examples: [['B24022_060E', 'B19001B_014E', 'C02014_002E']],
       },
       group: {

@@ -196,11 +196,14 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
       const out = formatAggregateResponse(baseInput({ rows: manyRows(250) }))
       expect(out).toContain('**TRUNCATED:**')
       expect(out).toContain('returned 250 records')
-      expect(out).toContain('Record 100:')
-      expect(out).not.toContain('Record 101:')
+      // 100 visible rows is over the compact threshold, so the records render
+      // as the compact table, capped at 100 data lines.
+      expect(out).toContain('100 records in compact table format')
+      expect(out).toContain('Place 100 |')
+      expect(out).not.toContain('Place 101 |')
       // Truncation caveat leads the caveats section, before any records.
       expect(out.indexOf('**TRUNCATED:**')).toBeLessThan(
-        out.indexOf('Record 1:'),
+        out.indexOf('Place 1 |'),
       )
       // Trailing truncation notice (a notice, not caveat duplication).
       expect(out).toContain(
@@ -220,8 +223,68 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
     it('does not emit TRUNCATED when the row count is under the cap', () => {
       const out = formatAggregateResponse(baseInput({ rows: manyRows(100) }))
       expect(out).not.toContain('**TRUNCATED:**')
-      expect(out).toContain('Record 100:')
+      expect(out).toContain('100 records in compact table format')
+      expect(out).toContain('Place 100 |')
       expect(out).not.toMatch(/\(Reminder:/)
+    })
+  })
+
+  describe('compact table format for large results', () => {
+    function manyRows(n: number, est = '300000', moe = '1500'): string[][] {
+      return Array.from({ length: n }, (_, i) => [
+        `Place ${i + 1}`,
+        est,
+        moe,
+        '02',
+      ])
+    }
+
+    it('switches to the compact table above 20 records', () => {
+      const out = formatAggregateResponse(baseInput({ rows: manyRows(21) }))
+      expect(out).toContain('21 records in compact table format')
+      expect(out).toContain('NAME | B25001_001E (+/- MOE) | state')
+      expect(out).toContain('Place 1 | 300,000 +/- 1,500 | 02')
+      expect(out).not.toContain('Record 1:')
+      // Labels move to a one-time legend instead of repeating per record.
+      expect(out).toContain('B25001_001E = Total housing units')
+    })
+
+    it('keeps Record blocks at exactly 20 records', () => {
+      const out = formatAggregateResponse(baseInput({ rows: manyRows(20) }))
+      expect(out).toContain('Record 20:')
+      expect(out).not.toContain('compact table format')
+    })
+
+    it('keeps the surrounding sections intact in compact mode', () => {
+      const out = formatAggregateResponse(baseInput({ rows: manyRows(30) }))
+      expect(out).toMatch(
+        /## Source[\s\S]*## Query[\s\S]*## Records[\s\S]*## Provenance/m,
+      )
+    })
+
+    it('emits only ASCII in compact mode', () => {
+      const out = formatAggregateResponse(baseInput({ rows: manyRows(30) }))
+      expect(findNonAscii(out)).toEqual([])
+    })
+
+    it('decodes sentinels to their short code in compact cells', () => {
+      const rows = manyRows(21)
+      rows[5] = ['Suppressed Place', '-666666666', '-666666666', '02']
+      const out = formatAggregateResponse(baseInput({ rows }))
+      expect(out).toContain('Suppressed Place | NOT_APPLICABLE | 02')
+      expect(out).not.toMatch(/-666666666/)
+      expect(out).toContain('**SUPPRESSED VALUES:**')
+    })
+
+    it('aggregates LOW RELIABILITY into a single caveat with inline flags', () => {
+      // est 1000, moe 600 -> CV = 600/1.645/1000 = 36%
+      const out = formatAggregateResponse(
+        baseInput({ rows: manyRows(25, '1000', '600') }),
+      )
+      expect(out).toContain('[LOW CV=36%]')
+      expect(out).toContain('25 estimate value(s)')
+      // One aggregated caveat, not one per row.
+      expect(out.match(/\*\*LOW RELIABILITY:\*\*/g)).toHaveLength(1)
     })
   })
 
