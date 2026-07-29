@@ -49,6 +49,12 @@ resource "aws_db_parameter_group" "mcp" {
   parameter {
     name  = "rds.force_ssl"
     value = "1"
+    # rds.force_ssl is a static parameter, so RDS only ever accepts it as
+    # pending-reboot. Terraform's default here is "immediate", which AWS
+    # silently stores as pending-reboot — leaving config and state permanently
+    # out of step and producing a remove/re-add diff on EVERY plan. Declaring it
+    # explicitly is what makes this resource converge.
+    apply_method = "pending-reboot"
   }
 }
 

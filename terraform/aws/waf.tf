@@ -7,8 +7,30 @@
 # Cost: ~$5/mo web ACL + $1/mo rule + $0.60 per million requests, so it is
 # opt-in via enable_waf (on for prod, off for staging).
 
+locals {
+  # Create this MCP's OWN web ACL only when it is not delegating to the
+  # fleet-wide one (mcp-stats/terraform/aws/shared_waf.tf). WAF bills ~$5/mo per
+  # web ACL + $1/mo per rule regardless of traffic, so a dedicated ACL is fixed
+  # cost; the shared ACL carries this MCP's rate limit as a Host-scoped rule.
+  #
+  # NOTE: once use_shared_waf is true, waf_rate_limit is no longer read here —
+  # the effective limit lives in mcp-stats' `fleet_waf_members`.
+  waf_enabled = var.enable_waf && !var.use_shared_waf
+
+  # The stage gets associated under either path.
+  waf_associated = local.waf_enabled || var.use_shared_waf
+}
+
+# The shared ACL lives in a different Terraform state (mcp-stats), so its ARN
+# comes via SSM rather than a cross-state remote read.
+data "aws_ssm_parameter" "shared_waf_arn" {
+  count = var.use_shared_waf ? 1 : 0
+
+  name = var.shared_waf_ssm_parameter
+}
+
 resource "aws_wafv2_web_acl" "mcp" {
-  count = var.enable_waf ? 1 : 0
+  count = local.waf_enabled ? 1 : 0
 
   name        = "${local.lambda_name}-waf"
   description = "Per-IP rate limiting for ${local.lambda_name}"
@@ -48,8 +70,12 @@ resource "aws_wafv2_web_acl" "mcp" {
 }
 
 resource "aws_wafv2_web_acl_association" "mcp" {
-  count = var.enable_waf ? 1 : 0
+  count = local.waf_associated ? 1 : 0
 
   resource_arn = aws_api_gateway_stage.stage.arn
-  web_acl_arn  = aws_wafv2_web_acl.mcp[0].arn
+
+  # Splat + one() instead of indexing [0]: exactly one of these lists is
+  # non-empty and one([]) is null, so the inactive branch cannot blow up with
+  # an index-out-of-range while the ternary is being evaluated.
+  web_acl_arn = var.use_shared_waf ? one(data.aws_ssm_parameter.shared_waf_arn[*].value) : one(aws_wafv2_web_acl.mcp[*].arn)
 }

@@ -28,3 +28,14 @@ alert_email          = "brendanbabb@gmail.com"
 monthly_budget_limit = 50
 enable_waf           = true
 debug_logs           = false
+
+# Use the fleet-wide WAF instead of a dedicated ACL for this MCP. A dedicated
+# ACL costs ~$8/mo in fixed AWS charges regardless of traffic; the shared ACL
+# keeps this MCP's 2000/5min limit as its own counter, aggregated on
+# (IP, Host) so it stays independent of the other MCPs sharing that limit.
+#
+# The effective limit now lives in mcp-stats' `fleet_waf_members` under the key
+# `census` — change it there, not here. The rate-limit value above is retained
+# so that rolling back (use_shared_waf = false) restores the original limit.
+# See mcp-stats/docs/waf-consolidation.md.
+use_shared_waf = true
