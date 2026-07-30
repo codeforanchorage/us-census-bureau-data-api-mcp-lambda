@@ -56,8 +56,7 @@ Manager + Lambda free tier).
 export CENSUS_API_KEY="your-key-here"
 
 # 3. Deploy (prod is the only environment; staging was torn down 2026-07-29
-#    to save ~$14/mo — restore snapshot census-mcp-staging-final-2026-07-29
-#    exists if it ever needs to come back)
+#    to save ~$14/mo — bringing it back means a fresh deploy + re-seed)
 ./scripts/deploy.sh
 ```
 
