@@ -55,8 +55,10 @@ Manager + Lambda free tier).
 # 2. Export your Census API key (the deploy script injects it into Lambda env)
 export CENSUS_API_KEY="your-key-here"
 
-# 3. Deploy staging
-./scripts/deploy.sh --environment staging
+# 3. Deploy (prod is the only environment; staging was torn down 2026-07-29
+#    to save ~$14/mo — restore snapshot census-mcp-staging-final-2026-07-29
+#    exists if it ever needs to come back)
+./scripts/deploy.sh
 ```
 
 The deploy script runs `terraform plan`, shows the diff, and asks for
@@ -102,7 +104,7 @@ cd terraform/aws && terraform output -raw api_gateway_url
 
 ```bash
 cd terraform/aws
-terraform destroy -var-file="staging.tfvars" -var="census_api_key=$CENSUS_API_KEY"
+terraform destroy -var-file="prod.tfvars" -var="census_api_key=$CENSUS_API_KEY"
 ```
 
 The S3 state bucket and DynamoDB lock table (created by `terraform/bootstrap`)

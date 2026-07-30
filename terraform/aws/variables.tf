@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "lambda_name" {
   description = "Name of the Lambda function"
   type        = string
-  default     = "census-mcp-staging"
+  default     = "census-mcp-prod"
 }
 
 variable "lambda_memory" {
@@ -31,7 +31,7 @@ variable "lambda_reserved_concurrency" {
 variable "stage_name" {
   description = "API Gateway stage name"
   type        = string
-  default     = "staging"
+  default     = "prod"
 }
 
 variable "api_quota_limit" {
