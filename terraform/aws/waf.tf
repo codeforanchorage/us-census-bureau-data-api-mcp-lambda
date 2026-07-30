@@ -5,7 +5,7 @@
 # while leaving the endpoint open (no API keys) for MCP clients.
 #
 # Cost: ~$5/mo web ACL + $1/mo rule + $0.60 per million requests, so it is
-# opt-in via enable_waf (on for prod, off for staging).
+# opt-in via enable_waf.
 
 locals {
   # Create this MCP's OWN web ACL only when it is not delegating to the

@@ -19,15 +19,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-ENVIRONMENT=""
+ENVIRONMENT="prod"
 TF_WORKSPACE=""
 
 show_usage() {
-    echo "Usage: $0 --environment <staging|prod> [--tfworkspace <name>]"
+    echo "Usage: $0 [--environment prod] [--tfworkspace <name>]"
     echo ""
     echo "Options:"
-    echo "  --environment, -e   Deployment environment: staging or prod (required)"
-    echo "  --tfworkspace, -w   Terraform workspace (default: census-staging or census-prod)"
+    echo "  --environment, -e   Deployment environment (only 'prod' exists; staging was torn down 2026-07-29)"
+    echo "  --tfworkspace, -w   Terraform workspace (default: census-<environment>)"
     echo "  --help, -h          Show this help message"
 }
 
@@ -44,10 +44,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [ -z "$ENVIRONMENT" ]; then
-    echo -e "${RED}--environment is required${NC}"; show_usage; exit 1
-fi
-if [ "$ENVIRONMENT" != "staging" ] && [ "$ENVIRONMENT" != "prod" ]; then
+if [ "$ENVIRONMENT" != "prod" ]; then
     echo -e "${RED}Invalid environment '${ENVIRONMENT}'${NC}"; show_usage; exit 1
 fi
 if [ -z "${CENSUS_API_KEY:-}" ]; then
