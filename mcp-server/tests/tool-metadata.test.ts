@@ -18,6 +18,8 @@ const EXPECTED_TITLES: Record<string, string> = {
   'fetch-aggregate-data': 'Fetch Aggregate Data',
   'fetch-dataset-geography': 'Fetch Dataset Geography',
   'list-datasets': 'List Datasets',
+  'list-survey-components': 'List Survey Components',
+  'list-survey-programs': 'List Survey Programs',
   'resolve-geography-fips': 'Resolve Geography FIPS',
   'search-data-tables': 'Search Data Tables',
 }

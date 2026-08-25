@@ -3,6 +3,8 @@ import { MCPServer } from './server.js'
 import { FetchAggregateDataTool } from './tools/fetch-aggregate-data.tool.js'
 import { FetchDatasetGeographyTool } from './tools/fetch-dataset-geography.tool.js'
 import { ListDatasetsTool } from './tools/list-datasets.tool.js'
+import { ListSurveyComponentsTool } from './tools/list-survey-components.tool.js'
+import { ListSurveyProgramsTool } from './tools/list-survey-programs.tool.js'
 import { ResolveGeographyFipsTool } from './tools/resolve-geography-fips.tool.js'
 import { SearchDataTablesTool } from './tools/search-data-tables.tool.js'
 
@@ -17,6 +19,8 @@ export function createServer(): MCPServer {
   mcpServer.registerTool(new FetchAggregateDataTool())
   mcpServer.registerTool(new FetchDatasetGeographyTool())
   mcpServer.registerTool(new ListDatasetsTool())
+  mcpServer.registerTool(new ListSurveyComponentsTool())
+  mcpServer.registerTool(new ListSurveyProgramsTool())
   mcpServer.registerTool(new ResolveGeographyFipsTool())
   mcpServer.registerTool(new SearchDataTablesTool())
 
