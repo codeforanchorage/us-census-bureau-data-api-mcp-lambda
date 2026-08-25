@@ -154,7 +154,7 @@ async function toolsListChecks() {
   console.log('\n== tools/list ==')
   const list = await post(rpc(20, 'tools/list'))
   const tools = list.json?.result?.tools ?? []
-  check('lists 5 tools', tools.length === 5, String(tools.length))
+  check('lists 7 tools', tools.length === 7, String(tools.length))
   check(
     'every tool has a top-level title',
     tools.every((t) => typeof t.title === 'string' && t.title.length > 0),
@@ -292,8 +292,44 @@ async function structuredChecks() {
     (aSc?.caveats ?? []).every((c) => textOf(agg).includes(c.message)),
   )
 
+  console.log('\n== structuredContent: survey programs/components ==')
+  const programs = await callTool(34, 'list-survey-programs', {})
+  const pSc = programs?.structuredContent
+  check('programs structuredContent present', !!pSc)
+  check(
+    'programs include ACS with a positive table count',
+    (pSc?.records ?? []).some(
+      (r) => r.program_string === 'ACS' && r.table_count > 0,
+    ),
+  )
+  const components = await callTool(35, 'list-survey-components', {
+    program_string: 'ACS',
+  })
+  const cSc = components?.structuredContent
+  check('components structuredContent present', !!cSc)
+  check(
+    'ACS components carry api_endpoint strings (incl. acs/acs5)',
+    (cSc?.records ?? []).some((r) => r.api_endpoint === 'acs/acs5'),
+  )
+  const compMiss = await callTool(36, 'list-survey-components', {
+    program_string: 'XYZZY',
+  })
+  const cmSc = compMiss?.structuredContent
+  check(
+    'components miss reports total_count 0 with NO_MATCH',
+    cmSc?.total_count === 0 &&
+      (cmSc?.caveats ?? []).some((c) => c.code === 'NO_MATCH'),
+  )
+
   console.log('\n== key redaction sweep ==')
-  const everything = JSON.stringify([hit, miss, search, agg])
+  const everything = JSON.stringify([
+    hit,
+    miss,
+    search,
+    agg,
+    programs,
+    components,
+  ])
   check(
     'no response contains an unredacted key= parameter',
     !/key=(?!REDACTED)[A-Za-z0-9]/.test(everything),
