@@ -13,7 +13,6 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { z } from 'zod'
 
-import { cleanupWithRetry } from '../../test-helpers/database-cleanup'
 import { dbConfig } from '../../test-helpers/database-config'
 import { YearSchema } from '../../../src/schema/year.schema'
 import { YearsConfig } from '../../../src/seeds/configs/years.config'
@@ -33,16 +32,44 @@ describe('Years Config', () => {
   let client: Client
   let databaseUrl: string
 
+  // Isolated per-run schema, same pattern as summary-levels.config.test.ts
+  // and get-or-create-year.helper.test.ts: the public `years` table is
+  // seeded and cleaned by most geography config test files, which vitest
+  // runs in PARALLEL, so asserting an exact row count against the shared
+  // table races (the idempotency test below read [] whenever another file
+  // cleaned `years` between our seed and our SELECT).
+  const testId = `${process.pid}_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`
+  const testSchema = `test_schema_years_${testId}`
+
   beforeAll(async () => {
     // Initialize client once for the entire test suite
     client = new Client(dbConfig)
     await client.connect()
 
-    // Construct database URL for SeedRunner
-    databaseUrl = `postgresql://${dbConfig.user}:${dbConfig.password}@${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`
+    // Create isolated test schema with the years table structure
+    // (mirrors migration 1755190777124 + 1765999444982).
+    await client.query(`CREATE SCHEMA IF NOT EXISTS ${testSchema}`)
+    await client.query(`SET search_path TO ${testSchema}`)
+    await client.query(`
+      CREATE TABLE years (
+        id BIGSERIAL PRIMARY KEY,
+        year INTEGER NOT NULL UNIQUE,
+        import_geographies BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `)
+
+    // Construct database URL for SeedRunner scoped to the test schema
+    databaseUrl = `postgresql://${dbConfig.user}:${dbConfig.password}@${dbConfig.host}:${dbConfig.port}/${dbConfig.database}?options=-c%20search_path%3D${testSchema}`
   })
 
   afterAll(async () => {
+    try {
+      await client.query(`DROP SCHEMA IF EXISTS ${testSchema} CASCADE`)
+    } catch (error) {
+      console.log('Schema cleanup failed:', error)
+    }
     await client.end()
   })
 
@@ -58,7 +85,7 @@ describe('Years Config', () => {
     runner = new SeedRunner(databaseUrl, fixturesPath)
     await runner.connect()
 
-    await cleanupWithRetry(client, ['years'])
+    await client.query('DELETE FROM years')
   })
 
   afterEach(async () => {

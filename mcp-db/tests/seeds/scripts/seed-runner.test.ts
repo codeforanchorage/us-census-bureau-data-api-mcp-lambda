@@ -104,6 +104,10 @@ describe('SeedRunner', () => {
       expect(instance).toBeInstanceOf(SeedRunner)
       expect(Client).toHaveBeenCalledWith({
         connectionString: 'postgresql://test:test@localhost:5432/test',
+        // TCP keepalive added in cfb9a5c so long seed runs against RDS
+        // survive idle-connection reaping.
+        keepAlive: true,
+        keepAliveInitialDelayMillis: 10000,
       })
     })
 
