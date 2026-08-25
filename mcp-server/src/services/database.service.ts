@@ -26,9 +26,22 @@ export class DatabaseService {
       connectionString: DATABASE_URL,
       // On Lambda each warm container handles one request at a time, so a big
       // pool just wastes RDS connections. Locally we keep headroom for tests.
+      // Fan-out arithmetic (must hold or load fails as connection refusal,
+      // not slowness): lambda_reserved_concurrency (40, prod.tfvars) x this
+      // max (2) = 80 connections, under the db.t4g.micro ~87 ceiling.
       max: isLambda ? 2 : 10,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: isLambda ? 5000 : 2000,
+      // Bottom rung of the timeout ladder (tightest at the bottom):
+      //   API Gateway  29s  hard, non-adjustable
+      //   Lambda       28s  prod.tfvars lambda_timeout
+      //   statement    20s  this -- leaves ~8s to format and return
+      // Without it a runaway query held its connection until the Lambda was
+      // killed, and the pool only reclaimed it when it next noticed.
+      // Observed prod max duration is 3.3s over 30 days, so 20s cuts
+      // nothing legitimate. Server-side (Postgres statement_timeout), so
+      // the query dies in the database, not just in the client.
+      statement_timeout: 20_000,
     }
 
     if (isLambda) {

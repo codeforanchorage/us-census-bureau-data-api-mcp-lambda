@@ -17,9 +17,9 @@ variable "lambda_memory" {
 }
 
 variable "lambda_timeout" {
-  description = "Lambda timeout in seconds"
+  description = "Lambda timeout in seconds. Must stay under the API Gateway REST 29s hard cutoff so the Lambda self-terminates before the client's 504 -- see the timeout-ladder comment in prod.tfvars."
   type        = number
-  default     = 60
+  default     = 28
 }
 
 variable "lambda_reserved_concurrency" {

@@ -72,6 +72,9 @@ describe('DatabaseService', () => {
         max: 10,
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 2000,
+        // Must sit under the Lambda timeout (28s) so a runaway query dies
+        // in Postgres before the Lambda is killed around it.
+        statement_timeout: 20_000,
       })
     })
   })
