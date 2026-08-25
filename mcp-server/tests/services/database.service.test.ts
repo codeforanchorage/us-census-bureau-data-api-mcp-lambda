@@ -98,11 +98,18 @@ describe('DatabaseService', () => {
 
     it('should release client even if query fails', async () => {
       mockClient.query.mockRejectedValue(new Error('Query failed'))
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
       const service = DatabaseService.getInstance()
 
-      await expect(service.query('INVALID SQL')).rejects.toThrow('Query failed')
+      // Driver errors are sanitized before reaching the caller (see
+      // database-error-hygiene.test.ts); the raw message goes to the log.
+      await expect(service.query('INVALID SQL')).rejects.toThrow(
+        'temporarily unavailable',
+      )
       expect(mockClient.release).toHaveBeenCalled()
+      expect(errorSpy).toHaveBeenCalled()
+      errorSpy.mockRestore()
     })
   })
 
