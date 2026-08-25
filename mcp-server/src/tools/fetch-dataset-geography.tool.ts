@@ -7,9 +7,10 @@ import {
   FetchDatasetGeographyArgs,
   FetchDatasetGeographyArgsSchema,
   FetchDatasetGeographyInputSchema,
+  FetchDatasetGeographyOutputSchema,
   GeographyJsonSchema,
 } from '../schema/dataset-geography.schema.js'
-import { ToolContent } from '../types/base.types.js'
+import { ToolCaveat, ToolResponse } from '../types/base.types.js'
 import {
   SummaryLevelRow,
   GeographyMetadata,
@@ -28,6 +29,8 @@ export class FetchDatasetGeographyTool extends BaseTool<FetchDatasetGeographyArg
 
   inputSchema: Tool['inputSchema'] =
     FetchDatasetGeographyArgsSchema as Tool['inputSchema']
+  outputSchema: Tool['inputSchema'] =
+    FetchDatasetGeographyOutputSchema as Tool['inputSchema']
 
   get argsSchema() {
     return FetchDatasetGeographyInputSchema
@@ -181,7 +184,7 @@ export class FetchDatasetGeographyTool extends BaseTool<FetchDatasetGeographyArg
   async toolHandler(
     args: FetchDatasetGeographyArgs,
     apiKey: string,
-  ): Promise<{ content: ToolContent[] }> {
+  ): Promise<ToolResponse> {
     try {
       // Check database health first
       const isDbHealthy = await this.dbService.healthCheck()
@@ -215,14 +218,32 @@ export class FetchDatasetGeographyTool extends BaseTool<FetchDatasetGeographyArg
             geographyLevels,
           )
 
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Available geographies for ${args.dataset}${args.year ? ` (${args.year})` : ''}:\n\n${JSON.stringify(parsedGeographyData)}`,
-              },
-            ],
-          }
+          // An empty fips list is still a successful, schema-conforming
+          // result: structuredContent must be present with total_count 0.
+          const caveats: ToolCaveat[] =
+            parsedGeographyData.length === 0
+              ? [
+                  {
+                    code: 'NO_GEOGRAPHY_LEVELS',
+                    message: `${args.dataset} publishes no FIPS geography levels${args.year ? ` for ${args.year}` : ''} -- it cannot be queried by for=/in= geography.`,
+                  },
+                ]
+              : []
+
+          const caveatText =
+            caveats.length > 0
+              ? `\n\n${caveats.map((c) => `**${c.code}:** ${c.message}`).join('\n\n')}`
+              : ''
+
+          return this.createSuccessResponse(
+            `Available geographies for ${args.dataset}${args.year ? ` (${args.year})` : ''}:\n\n${JSON.stringify(parsedGeographyData)}${caveatText}`,
+            {
+              query: { dataset: args.dataset, year: args.year ?? null },
+              total_count: parsedGeographyData.length,
+              levels: parsedGeographyData,
+              caveats,
+            },
+          )
         } catch (validationError) {
           const validationMessage =
             validationError instanceof Error

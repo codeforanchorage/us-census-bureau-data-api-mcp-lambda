@@ -24,13 +24,14 @@
 // reliably, so that duplication is gone -- the flags below carry the weight
 // once, up top.
 
-import { buildCitation } from './citation.js'
+import { buildCitation, redactKey } from './citation.js'
 import {
   classifyDataset,
   isStaleVintage,
   vintageBannerParts,
 } from './dataset-info.js'
 import { getSentinelInfo, isSentinel, decodeSentinel } from './sentinels.js'
+import { ToolCaveat } from '../types/base.types.js'
 import { VariablesIndex, labelForCell, prettyLabel } from './variables-cache.js'
 
 export interface FormatInput {
@@ -41,6 +42,8 @@ export interface FormatInput {
   rows: string[][]
   // Original `for=`/`in=`/`ucgid=`/`get=` echo for the Query section.
   queryEcho: string
+  // The same echo as individual fields, for the structured query block.
+  queryParams: Record<string, unknown>
   requestedVariables: string[]
   // MOE companion fields that we auto-added; surfaced as a caveat.
   autoAddedMoeFields: string[]
@@ -85,7 +88,31 @@ const GEO_LEVEL_COLUMNS = new Set([
   'ucgid',
 ])
 
-export function formatAggregateResponse(input: FormatInput): string {
+// Display labels for the stable caveat codes. The caveat list is built
+// ONCE and drives both the rendered prose and the structuredContent
+// caveats array, so the two channels cannot drift; these labels only
+// affect how the code renders in the text.
+const CAVEAT_LABELS: Record<string, string> = {
+  TRUNCATED: 'TRUNCATED',
+  LOW_RELIABILITY: 'LOW RELIABILITY',
+  SINGLE_UNIT_CLAIM: 'SINGLE-UNIT CLAIM',
+  SUPPRESSED_VALUES: 'SUPPRESSED VALUES',
+  STALE_VINTAGE: 'DATA FRESHNESS',
+  MOE_AUTO_PAIRED: 'MOE AUTO-PAIRED',
+}
+
+function renderCaveat(caveat: ToolCaveat): string {
+  return `**${CAVEAT_LABELS[caveat.code] ?? caveat.code}:** ${caveat.message}`
+}
+
+export interface FormattedAggregateResponse {
+  text: string
+  structured: Record<string, unknown>
+}
+
+export function formatAggregateResponse(
+  input: FormatInput,
+): FormattedAggregateResponse {
   const {
     dataset,
     year,
@@ -93,6 +120,7 @@ export function formatAggregateResponse(input: FormatInput): string {
     headers,
     rows,
     queryEcho,
+    queryParams,
     autoAddedMoeFields,
     variablesIndex,
     currentYear,
@@ -113,16 +141,18 @@ export function formatAggregateResponse(input: FormatInput): string {
     compact: visibleRows.length > compactThreshold,
   })
 
-  const caveats: string[] = []
+  const caveats: ToolCaveat[] = []
 
   // Truncation first -- every downstream claim depends on knowing the
   // response is partial. Reliability flags below cover shown records only.
   if (truncated) {
-    caveats.push(
-      `**TRUNCATED:** the query returned ${totalRecords} records; showing the first ${maxRecords}. ` +
+    caveats.push({
+      code: 'TRUNCATED',
+      message:
+        `the query returned ${totalRecords} records; showing the first ${maxRecords}. ` +
         `Do not compute totals or rankings from this partial list. Narrow the geography ` +
         `(for/in/ucgid) and re-run to get a complete result.`,
-    )
+    })
   }
 
   // Reliability flags next (the most specific, highest-leverage caveat).
@@ -132,34 +162,40 @@ export function formatAggregateResponse(input: FormatInput): string {
 
   // Single-unit claim caveat.
   if (decoded.geographyRowCount === 1) {
-    caveats.push(
-      '**SINGLE-UNIT CLAIM:** this response covers exactly one geography. Do not generalize the estimate to a larger region.',
-    )
+    caveats.push({
+      code: 'SINGLE_UNIT_CLAIM',
+      message:
+        'this response covers exactly one geography. Do not generalize the estimate to a larger region.',
+    })
   }
 
   // Suppression sentinel caveat.
   if (decoded.sentinelHitCount > 0) {
-    caveats.push(
-      `**SUPPRESSED VALUES:** ${decoded.sentinelHitCount} cell(s) were Census suppression sentinels, decoded inline (e.g. SUPPRESSED, NOT_APPLICABLE). Do not treat them as numbers.`,
-    )
+    caveats.push({
+      code: 'SUPPRESSED_VALUES',
+      message: `${decoded.sentinelHitCount} cell(s) were Census suppression sentinels, decoded inline (e.g. SUPPRESSED, NOT_APPLICABLE). Do not treat them as numbers.`,
+    })
   }
 
   // Vintage staleness caveat.
-  const staleness = stalenessBanner(dataset, year, currentYear)
-  if (staleness) caveats.push(staleness)
+  const staleness = stalenessMessage(dataset, year, currentYear)
+  if (staleness) {
+    caveats.push({ code: 'STALE_VINTAGE', message: staleness })
+  }
 
   // MOE auto-pairing caveat.
   if (autoAddedMoeFields.length > 0) {
-    caveats.push(
-      `**MOE AUTO-PAIRED:** margin-of-error fields (${autoAddedMoeFields.join(', ')}) were added automatically. Report each estimate with its MOE, not on its own.`,
-    )
+    caveats.push({
+      code: 'MOE_AUTO_PAIRED',
+      message: `margin-of-error fields (${autoAddedMoeFields.join(', ')}) were added automatically. Report each estimate with its MOE, not on its own.`,
+    })
   }
 
   const sections: string[] = []
 
   if (caveats.length > 0) {
     sections.push('## Caveats')
-    sections.push(caveats.join('\n\n'))
+    sections.push(caveats.map(renderCaveat).join('\n\n'))
   }
 
   sections.push('## Source')
@@ -185,7 +221,36 @@ export function formatAggregateResponse(input: FormatInput): string {
     )
   }
 
-  return sections.join('\n\n')
+  // Structured mirror. Records cover the SHOWN rows -- the display cap
+  // exists to protect the consuming model's context, and structuredContent
+  // lands in that same context, so mirroring the clip (with total_count /
+  // shown_count and the TRUNCATED caveat carrying the difference) is the
+  // honest shape, not a loophole around the cap.
+  const banner = vintageBannerParts(dataset, year)
+  const structuredRecords = buildStructuredRecords({
+    headers,
+    rows: visibleRows,
+    variablesIndex,
+    cvFlagThreshold,
+  })
+
+  const structured: Record<string, unknown> = {
+    query: queryParams,
+    source: {
+      dataset,
+      vintage: String(year),
+      label: banner.label,
+      collection_window: banner.collectionWindow ?? null,
+      citation_url: redactKey(url),
+    },
+    total_count: totalRecords,
+    shown_count: visibleRows.length,
+    variables: structuredRecords.variables,
+    records: structuredRecords.records,
+    caveats,
+  }
+
+  return { text: sections.join('\n\n'), structured }
 }
 
 function buildProvenanceBanner(dataset: string, year: number | string): string {
@@ -196,7 +261,7 @@ function buildProvenanceBanner(dataset: string, year: number | string): string {
   return `${banner.label}, ${banner.yearLabel}${window}. Dataset: ${dataset}.`
 }
 
-function stalenessBanner(
+function stalenessMessage(
   dataset: string,
   year: number | string,
   currentYear: number,
@@ -207,14 +272,14 @@ function stalenessBanner(
     ? ` (collected ${banner.collectionWindow})`
     : ''
   return (
-    `**DATA FRESHNESS:** this is ${banner.label} ${banner.yearLabel}${window}. ` +
+    `this is ${banner.label} ${banner.yearLabel}${window}. ` +
     `A newer release is likely available -- check list-datasets unless you need this vintage.`
   )
 }
 
 interface DecodeResult {
   rendered: string
-  reliabilityFlags: string[]
+  reliabilityFlags: ToolCaveat[]
   geographyRowCount: number
   sentinelHitCount: number
 }
@@ -256,7 +321,7 @@ function decodeRows(opts: {
   })
 
   const recordBlocks: string[] = []
-  const reliabilityFlags: string[] = []
+  const reliabilityFlags: ToolCaveat[] = []
   let geographyRowCount = 0
   let sentinelHitCount = 0
 
@@ -362,13 +427,15 @@ function renderCompactTable(opts: {
     tableLines.push(cells.join(' | '))
   }
 
-  const reliabilityFlags: string[] = []
+  const reliabilityFlags: ToolCaveat[] = []
   if (lowReliabilityCount > 0) {
-    reliabilityFlags.push(
-      `**LOW RELIABILITY:** ${lowReliabilityCount} estimate value(s) in the shown records have ` +
+    reliabilityFlags.push({
+      code: 'LOW_RELIABILITY',
+      message:
+        `${lowReliabilityCount} estimate value(s) in the shown records have ` +
         `CV above ${Math.round(cvFlagThreshold * 100)}% -- flagged inline as [LOW CV=..%]. ` +
         `Treat those cells as MOE bands, not point estimates.`,
-    )
+    })
   }
 
   const parts: string[] = [
@@ -426,7 +493,7 @@ function renderEstimateWithMoe(opts: {
   moeRaw: string
   cvFlagThreshold: number
   geographyName: string | null
-  reliabilityFlags: string[]
+  reliabilityFlags: ToolCaveat[]
   estimateCode: string
 }): string {
   const { label, estimateRaw, moeRaw, cvFlagThreshold } = opts
@@ -461,14 +528,149 @@ function renderEstimateWithMoe(opts: {
   if (cv > cvFlagThreshold) {
     suffix = ` **[LOW RELIABILITY: CV=${cvPct}%]**`
     const geo = opts.geographyName ? ` for ${opts.geographyName}` : ''
-    opts.reliabilityFlags.push(
-      `**LOW RELIABILITY:** ${opts.estimateCode}${geo} has CV=${cvPct}% ` +
+    opts.reliabilityFlags.push({
+      code: 'LOW_RELIABILITY',
+      message:
+        `${opts.estimateCode}${geo} has CV=${cvPct}% ` +
         `(threshold ${Math.round(cvFlagThreshold * 100)}%) -- too imprecise for ` +
         `a point claim; use the MOE band, not the point estimate.`,
-    )
+    })
   }
 
   return `${label}: ${formatNumber(estimate)} +/- ${formatNumber(moe)} (90% CI)${suffix}`
+}
+
+// Structured mirror of the rendered records, built with the same sentinel
+// and CV rules as the text paths. Honesty rules baked in:
+//  - Sentinel values NEVER appear as numbers: value/moe become null and the
+//    sentinel's short code lands in annotation/moe_annotation. A consumer
+//    that averages `value` fields can no longer fold -666666666 in.
+//  - MOE travels WITH its estimate (merged into the same cell), or the
+//    cell says why not (moe_annotation).
+//  - Geography identifiers (FIPS pieces, GEO_ID, ucgid) stay STRINGS end
+//    to end -- leading zeros are load-bearing, JSON numbers eat them.
+//  - Non-numeric values (NAME, GEO_ID, annotations Census returns as
+//    text) pass through as strings; the schema admits them rather than
+//    declaring a numeric constraint real data violates.
+export function buildStructuredRecords(opts: {
+  headers: string[]
+  rows: string[][]
+  variablesIndex: VariablesIndex | null
+  cvFlagThreshold: number
+}): {
+  variables: Record<string, unknown>[]
+  records: Record<string, unknown>[]
+} {
+  const { headers, rows, variablesIndex, cvFlagThreshold } = opts
+
+  const moeIndexByEstimate = new Map<number, number>()
+  for (let i = 0; i < headers.length; i++) {
+    const h = headers[i]
+    if (h.endsWith('E')) {
+      const expectedMoe = h.slice(0, -1) + 'M'
+      const moeIdx = headers.indexOf(expectedMoe)
+      if (moeIdx >= 0) moeIndexByEstimate.set(i, moeIdx)
+    }
+  }
+  const mergedMoeColumns = new Set(moeIndexByEstimate.values())
+
+  // One-time legend so per-cell entries stay small.
+  const variables: Record<string, unknown>[] = []
+  for (let i = 0; i < headers.length; i++) {
+    const h = headers[i]
+    if (mergedMoeColumns.has(i)) continue
+    if (GEO_LEVEL_COLUMNS.has(h.toLowerCase()) || h === 'NAME') continue
+    const label = variablesIndex?.byName.get(h)?.label
+    variables.push({
+      name: h,
+      label: label ? prettyLabel(label) : null,
+      moe_variable: moeIndexByEstimate.has(i)
+        ? headers[moeIndexByEstimate.get(i)!]
+        : null,
+    })
+  }
+
+  const records = rows.map((row) => {
+    const geography: {
+      name: string | null
+      codes: { level: string; code: string }[]
+    } = { name: null, codes: [] }
+    const cells: Record<string, unknown>[] = []
+
+    for (let i = 0; i < headers.length; i++) {
+      if (mergedMoeColumns.has(i)) continue
+      const h = headers[i]
+      const raw = row[i]
+
+      if (h === 'NAME') {
+        geography.name = raw ?? null
+        continue
+      }
+      if (GEO_LEVEL_COLUMNS.has(h.toLowerCase())) {
+        geography.codes.push({ level: h, code: raw ?? '' })
+        continue
+      }
+
+      const cell: Record<string, unknown> = { variable: h }
+      const sentinel = getSentinelInfo(raw)
+      if (sentinel) {
+        cell.value = null
+        cell.annotation = sentinel.short
+      } else {
+        const n = Number(raw)
+        // Numeric-looking values become numbers; empty/absent cells become
+        // null (unmeasured, NOT zero); anything else (GEO_ID, text
+        // annotations) stays a string.
+        if (raw === undefined || raw === null || raw === '') {
+          cell.value = null
+        } else if (Number.isFinite(n)) {
+          cell.value = n
+        } else {
+          cell.value = raw
+        }
+        cell.annotation = null
+      }
+
+      if (moeIndexByEstimate.has(i)) {
+        const moeRaw = row[moeIndexByEstimate.get(i)!]
+        const moeSentinel = getSentinelInfo(moeRaw)
+        if (moeSentinel) {
+          cell.moe = null
+          cell.moe_annotation = moeSentinel.short
+        } else {
+          const moeN = Number(moeRaw)
+          cell.moe =
+            moeRaw !== undefined &&
+            moeRaw !== null &&
+            moeRaw !== '' &&
+            Number.isFinite(moeN)
+              ? moeN
+              : null
+          cell.moe_annotation = null
+        }
+
+        // Same CV rule as the text renderers.
+        if (
+          typeof cell.value === 'number' &&
+          cell.value !== 0 &&
+          typeof cell.moe === 'number'
+        ) {
+          const cv = cell.moe / 1.645 / Math.abs(cell.value)
+          cell.cv_percent = Math.round(cv * 100)
+          cell.low_reliability = cv > cvFlagThreshold
+        } else {
+          cell.cv_percent = null
+          cell.low_reliability = false
+        }
+      }
+
+      cells.push(cell)
+    }
+
+    return { geography, cells }
+  })
+
+  return { variables, records }
 }
 
 function extractName(headers: string[], row: string[]): string | null {
@@ -486,7 +688,7 @@ function formatNumber(n: number): string {
 // Re-export for convenience in tests.
 export const __testing = {
   buildProvenanceBanner,
-  stalenessBanner,
+  stalenessMessage,
   decodeRows,
   classifyDataset,
   isSentinel,

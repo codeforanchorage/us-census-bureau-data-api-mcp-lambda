@@ -5,6 +5,7 @@ import { Tool } from '@modelcontextprotocol/sdk/types.js'
 import {
   AllDatasetMetadataJsonSchema,
   AllDatasetMetadataJsonResponseType,
+  ListDatasetsOutputSchema,
   SimplifiedAPIDatasetType,
   AggregatedResultType,
   DatasetType,
@@ -13,14 +14,20 @@ import {
 import { BaseTool } from './base.tool.js'
 
 import { fetchWithTimeout } from '../helpers/http.js'
-import { ToolContent } from '../types/base.types.js'
+import { ToolResponse } from '../types/base.types.js'
 
 export const toolDescription = `Call this FIRST when the user asks for Census data but has not named a dataset; do not guess the dataset_id. Returns the full Census catalog of dataset IDs, titles, and available vintages. Workflow: list-datasets -> search-data-tables -> fetch-dataset-geography -> resolve-geography-fips -> fetch-aggregate-data.`
 
 // Module-level cache — persists across warm Lambda invocations so repeated
-// calls don't refetch Census's ~2MB data.json catalog every time.
+// calls don't refetch Census's ~2MB data.json catalog every time. Holds the
+// aggregated array (not just its JSON string) so cache hits can rebuild
+// both the text and the structuredContent channels.
 const CATALOG_TTL_MS = 60 * 60 * 1000
-let catalogCache: { json: string; expiresAt: number } | null = null
+let catalogCache: {
+  aggregated: AggregatedResultType[]
+  json: string
+  expiresAt: number
+} | null = null
 
 // Test hook, mirroring clearVariablesCache in variables-cache.ts.
 export function clearCatalogCache(): void {
@@ -38,6 +45,8 @@ export class ListDatasetsTool extends BaseTool<object> {
     properties: {},
     required: [],
   }
+  outputSchema: Tool['inputSchema'] =
+    ListDatasetsOutputSchema as Tool['inputSchema']
 
   get argsSchema() {
     return z.object({})
@@ -141,15 +150,25 @@ export class ListDatasetsTool extends BaseTool<object> {
     return Array.from(grouped.values())
   }
 
-  async toolHandler(
-    args: object,
-    apiKey: string,
-  ): Promise<{ content: ToolContent[] }> {
+  // Structured mirror of the catalog text (which is already JSON). Both
+  // channels are built from the same aggregated array.
+  private structuredCatalog(
+    aggregated: AggregatedResultType[],
+  ): Record<string, unknown> {
+    return {
+      total_count: aggregated.length,
+      datasets: aggregated,
+      caveats: [],
+    }
+  }
+
+  async toolHandler(args: object, apiKey: string): Promise<ToolResponse> {
     const now = Date.now()
     if (catalogCache && catalogCache.expiresAt > now) {
-      return {
-        content: [{ type: 'text', text: catalogCache.json }],
-      }
+      return this.createSuccessResponse(
+        catalogCache.json,
+        this.structuredCatalog(catalogCache.aggregated),
+      )
     }
 
     try {
@@ -185,11 +204,12 @@ export class ListDatasetsTool extends BaseTool<object> {
         return value === null ? undefined : value
       })
 
-      catalogCache = { json, expiresAt: now + CATALOG_TTL_MS }
+      catalogCache = { aggregated, json, expiresAt: now + CATALOG_TTL_MS }
 
-      return {
-        content: [{ type: 'text', text: json }],
-      }
+      return this.createSuccessResponse(
+        json,
+        this.structuredCatalog(aggregated),
+      )
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error occurred'

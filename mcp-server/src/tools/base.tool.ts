@@ -1,7 +1,7 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 
-import { ToolContent } from '../types/base.types.js'
+import { ToolResponse } from '../types/base.types.js'
 
 // Behaviour hints shown to clients in tools/list. Every tool here is a
 // read-only query, so the annotations are uniform. idempotentHint is
@@ -26,8 +26,14 @@ export interface MCPTool<Args extends object = object> {
   title: string
   description: string
   inputSchema: Tool['inputSchema']
+  // JSON schema for structuredContent, emitted as outputSchema in
+  // tools/list. Optional: a tool without one is untouched on the wire.
+  // A declared outputSchema is BINDING -- the server MUST conform and
+  // clients may validate -- so never declare a constraint real Census
+  // data can violate.
+  outputSchema?: Tool['inputSchema']
   argsSchema: z.ZodSchema<Args, z.ZodTypeDef, Args>
-  handler: (args: Args) => Promise<{ content: ToolContent[] }>
+  handler: (args: Args) => Promise<ToolResponse>
 }
 
 interface StoredMCPTool {
@@ -35,8 +41,9 @@ interface StoredMCPTool {
   title: string
   description: string
   inputSchema: Tool['inputSchema']
+  outputSchema?: Tool['inputSchema']
   argsSchema: z.ZodSchema<object, z.ZodTypeDef, object>
-  handler: (args: object) => Promise<{ content: ToolContent[] }>
+  handler: (args: object) => Promise<ToolResponse>
 }
 
 export abstract class BaseTool<Args extends object> implements MCPTool<Args> {
@@ -44,14 +51,15 @@ export abstract class BaseTool<Args extends object> implements MCPTool<Args> {
   abstract title: string
   abstract description: string
   abstract inputSchema: Tool['inputSchema']
+  outputSchema?: Tool['inputSchema']
   abstract get argsSchema(): z.ZodType<Args, z.ZodTypeDef, Args>
   protected abstract toolHandler(
     args: Args,
     apiKey?: string,
-  ): Promise<{ content: ToolContent[] }>
+  ): Promise<ToolResponse>
   abstract readonly requiresApiKey: boolean
 
-  async handler(args: Args): Promise<{ content: ToolContent[] }> {
+  async handler(args: Args): Promise<ToolResponse> {
     try {
       let apiKey: string | undefined
 
@@ -71,7 +79,11 @@ export abstract class BaseTool<Args extends object> implements MCPTool<Args> {
     }
   }
 
-  protected createErrorResponse(message: string): { content: ToolContent[] } {
+  // Tool-level failure: isError marks it as the spec's in-band error
+  // channel -- without the flag a client cannot tell an error message
+  // from data. Error results deliberately carry no structuredContent;
+  // outputSchema binds successful results only.
+  protected createErrorResponse(message: string): ToolResponse {
     return {
       content: [
         {
@@ -79,10 +91,14 @@ export abstract class BaseTool<Args extends object> implements MCPTool<Args> {
           text: message,
         },
       ],
+      isError: true,
     }
   }
 
-  protected createSuccessResponse(text: string): { content: ToolContent[] } {
+  protected createSuccessResponse(
+    text: string,
+    structuredContent?: Record<string, unknown>,
+  ): ToolResponse {
     return {
       content: [
         {
@@ -90,6 +106,7 @@ export abstract class BaseTool<Args extends object> implements MCPTool<Args> {
           text,
         },
       ],
+      ...(structuredContent !== undefined ? { structuredContent } : {}),
     }
   }
 }
@@ -104,10 +121,9 @@ export class ToolRegistry {
       title: tool.title,
       description: tool.description,
       inputSchema: tool.inputSchema,
+      outputSchema: tool.outputSchema,
       argsSchema: tool.argsSchema as z.ZodSchema<object, z.ZodTypeDef, object>,
-      handler: tool.handler as (
-        args: object,
-      ) => Promise<{ content: ToolContent[] }>,
+      handler: tool.handler as (args: object) => Promise<ToolResponse>,
     }
     this.tools.set(tool.name, storedTool)
   }

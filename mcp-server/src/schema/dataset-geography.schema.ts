@@ -132,6 +132,85 @@ export function parseGeographyJson(
   return ParsedGeographyJsonSchema.parse(parsed)
 }
 
+// Schema for structuredContent (emitted as outputSchema in tools/list).
+// Mirrors what parseGeographyJsonWithDb actually emits -- note
+// allowsWildcard is a BOOLEAN there (unlike ParsedGeographyEntrySchema,
+// which describes the unused base parser's shape).
+export const FetchDatasetGeographyOutputSchema = {
+  type: 'object',
+  properties: {
+    query: {
+      type: 'object',
+      properties: {
+        dataset: { type: 'string' },
+        year: {
+          type: ['number', 'null'],
+          description: 'null when the dataset is not vintage-scoped.',
+        },
+      },
+      required: ['dataset', 'year'],
+    },
+    total_count: {
+      type: 'integer',
+      description:
+        'Number of geography levels this dataset publishes. 0 means the dataset exposes no FIPS geography levels.',
+    },
+    levels: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          vintage: { type: 'string' },
+          displayName: { type: 'string' },
+          querySyntax: {
+            type: 'string',
+            description:
+              "Exact for=/in= level syntax (e.g. 'congressional+district').",
+          },
+          code: {
+            type: 'string',
+            description:
+              '3-digit summary level code as a string; leading zeros are significant.',
+          },
+          name: { type: 'string' },
+          hierarchy: { type: 'array', items: { type: 'string' } },
+          fullName: { type: 'string' },
+          description: { type: 'string' },
+          onSpine: { type: 'boolean' },
+          queryExample: { type: 'string' },
+          requires: { type: 'array', items: { type: 'string' } },
+          allowsWildcard: { type: 'boolean' },
+          wildcardFor: { type: 'array', items: { type: 'string' } },
+        },
+        required: [
+          'vintage',
+          'displayName',
+          'querySyntax',
+          'code',
+          'name',
+          'hierarchy',
+          'fullName',
+          'onSpine',
+          'queryExample',
+          'allowsWildcard',
+        ],
+      },
+    },
+    caveats: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          code: { type: 'string' },
+          message: { type: 'string' },
+        },
+        required: ['code', 'message'],
+      },
+    },
+  },
+  required: ['query', 'total_count', 'levels', 'caveats'],
+}
+
 export type FetchDatasetGeographyArgs = z.infer<
   typeof FetchDatasetGeographyInputSchema
 >

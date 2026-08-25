@@ -7,6 +7,50 @@ export const AggregatedResultSchema = z.object({
   title: z.string(),
 })
 
+// Schema for structuredContent (emitted as outputSchema in tools/list).
+export const ListDatasetsOutputSchema = {
+  type: 'object',
+  properties: {
+    total_count: {
+      type: 'integer',
+      description: 'Number of aggregate datasets in the catalog.',
+    },
+    datasets: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          dataset: {
+            type: 'string',
+            description:
+              "Dataset identifier to pass to the other tools (e.g. 'acs/acs5').",
+          },
+          title: { type: 'string' },
+          years: {
+            type: 'array',
+            items: { type: 'number' },
+            description:
+              'Published vintages, ascending. May be empty for datasets without a vintage axis.',
+          },
+        },
+        required: ['dataset', 'title'],
+      },
+    },
+    caveats: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          code: { type: 'string' },
+          message: { type: 'string' },
+        },
+        required: ['code', 'message'],
+      },
+    },
+  },
+  required: ['total_count', 'datasets', 'caveats'],
+}
+
 // Zod schema for the simplified dataset
 export const SimplifiedAPIDatasetSchema = z.object({
   c_dataset: z.string(),

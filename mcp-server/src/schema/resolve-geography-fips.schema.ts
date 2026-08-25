@@ -45,6 +45,82 @@ export const ResolveGeographyFipsArgsSchema = {
   required: ['geography_name'],
 }
 
+// Schema for structuredContent (emitted as outputSchema in tools/list).
+// Binding: never declare a constraint real data can violate. FIPS pieces
+// inside for/in stay strings end to end -- leading zeros are load-bearing.
+export const ResolveGeographyFipsOutputSchema = {
+  type: 'object',
+  properties: {
+    query: {
+      type: 'object',
+      description: 'Echo of the search as executed.',
+      properties: {
+        geography_name: { type: 'string' },
+        summary_level_requested: {
+          type: ['string', 'null'],
+          description: 'The summary_level argument as passed, or null.',
+        },
+        summary_level_resolved: {
+          type: ['string', 'null'],
+          description:
+            'The summary level the filter actually resolved to; null when none was requested or the requested one matched nothing (see the SUMMARY_LEVEL_IGNORED caveat).',
+        },
+      },
+      required: [
+        'geography_name',
+        'summary_level_requested',
+        'summary_level_resolved',
+      ],
+    },
+    total_count: {
+      type: 'integer',
+      description:
+        'Total geographies matched. 0 means the search ran and matched nothing.',
+    },
+    shown_count: {
+      type: 'integer',
+      description: 'Number of records included below (after the limit).',
+    },
+    records: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          summary_level: { type: 'string' },
+          for: {
+            type: 'string',
+            description:
+              'Ready-to-use for= query string for fetch-aggregate-data. FIPS codes are strings; leading zeros are significant.',
+          },
+          in: {
+            type: ['string', 'null'],
+            description:
+              'Parent-geography in= query string, or null for levels with no required parent.',
+          },
+          latitude: { type: ['number', 'null'] },
+          longitude: { type: ['number', 'null'] },
+        },
+        required: ['name', 'summary_level', 'for', 'in'],
+      },
+    },
+    caveats: {
+      type: 'array',
+      description:
+        'Machine-readable qualifications; every message also appears in the text content.',
+      items: {
+        type: 'object',
+        properties: {
+          code: { type: 'string' },
+          message: { type: 'string' },
+        },
+        required: ['code', 'message'],
+      },
+    },
+  },
+  required: ['query', 'total_count', 'shown_count', 'records', 'caveats'],
+}
+
 export type ResolveGeographyFipsArgs = z.infer<
   typeof ResolveGeographyFipsInputSchema
 >

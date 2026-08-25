@@ -4,10 +4,19 @@ vi.mock('../../src/helpers/citation', () => ({
   buildCitation: vi.fn(
     (url: string) => `Source: U.S. Census Bureau Data API (${url})`,
   ),
+  redactKey: vi.fn((url: string) => url),
 }))
 
 import { formatAggregateResponse } from '../../src/helpers/response-format'
 import type { VariablesIndex } from '../../src/helpers/variables-cache'
+
+// These shape tests exercise the rendered text channel; the structured
+// channel has its own suite in structured-output.test.ts.
+function formatText(
+  input: Parameters<typeof formatAggregateResponse>[0],
+): string {
+  return formatAggregateResponse(input).text
+}
 
 // Walk a string by code point rather than a regex so eslint's no-control-regex
 // rule does not fire on the literal ASCII range.
@@ -59,6 +68,7 @@ function baseInput(
     autoAddedMoeFields: ['B25001_001M'],
     variablesIndex: makeIndex(),
     currentYear: 2025,
+    queryParams: {},
     ...overrides,
   }
 }
@@ -66,27 +76,27 @@ function baseInput(
 describe('formatAggregateResponse (Copilot/4o shape)', () => {
   describe('ASCII-only output', () => {
     it('emits no non-ASCII bytes', () => {
-      const out = formatAggregateResponse(baseInput())
+      const out = formatText(baseInput())
       const offending = findNonAscii(out)
       expect(offending).toEqual([])
     })
 
     it('uses +/- rather than the plus-minus glyph', () => {
-      const out = formatAggregateResponse(baseInput())
+      const out = formatText(baseInput())
       expect(out).toContain('+/-')
     })
   })
 
   describe('section headers', () => {
     it('uses ## Source, ## Query, ## Records, ## Provenance sections', () => {
-      const out = formatAggregateResponse(baseInput())
+      const out = formatText(baseInput())
       expect(out).toMatch(
         /^## Caveats[\s\S]*## Source[\s\S]*## Query[\s\S]*## Records[\s\S]*## Provenance/m,
       )
     })
 
     it('keeps Source after Caveats so the caveats lead', () => {
-      const out = formatAggregateResponse(baseInput())
+      const out = formatText(baseInput())
       const caveatsIdx = out.indexOf('## Caveats')
       const sourceIdx = out.indexOf('## Source')
       expect(caveatsIdx).toBeGreaterThanOrEqual(0)
@@ -94,7 +104,7 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
     })
 
     it('omits the ## Caveats section entirely when there are no caveats', () => {
-      const out = formatAggregateResponse(
+      const out = formatText(
         baseInput({
           autoAddedMoeFields: [],
           rows: [
@@ -110,7 +120,7 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
 
   describe('numbered record blocks', () => {
     it('renders rows as "Record N:" blocks rather than pipe-joined inline', () => {
-      const out = formatAggregateResponse(
+      const out = formatText(
         baseInput({
           rows: [
             ['Alaska', '300000', '1500', '02'],
@@ -123,7 +133,7 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
     })
 
     it('shows the human cell label inside the record block', () => {
-      const out = formatAggregateResponse(baseInput())
+      const out = formatText(baseInput())
       expect(out).toContain('B25001_001E (Total housing units)')
       expect(out).toContain('300,000')
       expect(out).toContain('1,500')
@@ -131,14 +141,14 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
     })
 
     it('renders (no records returned) when the API returned an empty result set', () => {
-      const out = formatAggregateResponse(baseInput({ rows: [] }))
+      const out = formatText(baseInput({ rows: [] }))
       expect(out).toContain('(no records returned)')
     })
   })
 
   describe('lead-with-caveats (single mention, no trailing duplication)', () => {
     it('leads with SINGLE-UNIT CLAIM before the records', () => {
-      const out = formatAggregateResponse(baseInput())
+      const out = formatText(baseInput())
       expect(out).toContain('**SINGLE-UNIT CLAIM:**')
       // Caveat sits before records.
       expect(out.indexOf('**SINGLE-UNIT CLAIM:**')).toBeLessThan(
@@ -149,7 +159,7 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
     })
 
     it('LOW RELIABILITY caveat fires once in the ## Caveats section', () => {
-      const out = formatAggregateResponse(
+      const out = formatText(
         baseInput({
           rows: [['Test Tract', '1000', '600', '02']],
         }),
@@ -159,7 +169,7 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
     })
 
     it('emits the SUPPRESSED VALUES caveat when a sentinel is hit', () => {
-      const out = formatAggregateResponse(
+      const out = formatText(
         baseInput({
           rows: [['Suppressed Place', '-666666666', '-666666666', '02']],
         }),
@@ -173,7 +183,7 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
     })
 
     it('does NOT flag LOW RELIABILITY on a precise estimate (no false-alarm training)', () => {
-      const out = formatAggregateResponse(
+      const out = formatText(
         baseInput({
           rows: [['Test Tract', '100000', '1500', '02']],
         }),
@@ -193,7 +203,7 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
     }
 
     it('caps rendered records at 100 by default with a leading TRUNCATED caveat', () => {
-      const out = formatAggregateResponse(baseInput({ rows: manyRows(250) }))
+      const out = formatText(baseInput({ rows: manyRows(250) }))
       expect(out).toContain('**TRUNCATED:**')
       expect(out).toContain('returned 250 records')
       // 100 visible rows is over the compact threshold, so the records render
@@ -212,7 +222,7 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
     })
 
     it('honors a custom maxRecords', () => {
-      const out = formatAggregateResponse(
+      const out = formatText(
         baseInput({ rows: manyRows(5), maxRecords: 3 }),
       )
       expect(out).toContain('Record 3:')
@@ -221,7 +231,7 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
     })
 
     it('does not emit TRUNCATED when the row count is under the cap', () => {
-      const out = formatAggregateResponse(baseInput({ rows: manyRows(100) }))
+      const out = formatText(baseInput({ rows: manyRows(100) }))
       expect(out).not.toContain('**TRUNCATED:**')
       expect(out).toContain('100 records in compact table format')
       expect(out).toContain('Place 100 |')
@@ -240,7 +250,7 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
     }
 
     it('switches to the compact table above 20 records', () => {
-      const out = formatAggregateResponse(baseInput({ rows: manyRows(21) }))
+      const out = formatText(baseInput({ rows: manyRows(21) }))
       expect(out).toContain('21 records in compact table format')
       expect(out).toContain('NAME | B25001_001E (+/- MOE) | state')
       expect(out).toContain('Place 1 | 300,000 +/- 1,500 | 02')
@@ -250,27 +260,27 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
     })
 
     it('keeps Record blocks at exactly 20 records', () => {
-      const out = formatAggregateResponse(baseInput({ rows: manyRows(20) }))
+      const out = formatText(baseInput({ rows: manyRows(20) }))
       expect(out).toContain('Record 20:')
       expect(out).not.toContain('compact table format')
     })
 
     it('keeps the surrounding sections intact in compact mode', () => {
-      const out = formatAggregateResponse(baseInput({ rows: manyRows(30) }))
+      const out = formatText(baseInput({ rows: manyRows(30) }))
       expect(out).toMatch(
         /## Source[\s\S]*## Query[\s\S]*## Records[\s\S]*## Provenance/m,
       )
     })
 
     it('emits only ASCII in compact mode', () => {
-      const out = formatAggregateResponse(baseInput({ rows: manyRows(30) }))
+      const out = formatText(baseInput({ rows: manyRows(30) }))
       expect(findNonAscii(out)).toEqual([])
     })
 
     it('decodes sentinels to their short code in compact cells', () => {
       const rows = manyRows(21)
       rows[5] = ['Suppressed Place', '-666666666', '-666666666', '02']
-      const out = formatAggregateResponse(baseInput({ rows }))
+      const out = formatText(baseInput({ rows }))
       expect(out).toContain('Suppressed Place | NOT_APPLICABLE | 02')
       expect(out).not.toMatch(/-666666666/)
       expect(out).toContain('**SUPPRESSED VALUES:**')
@@ -278,7 +288,7 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
 
     it('aggregates LOW RELIABILITY into a single caveat with inline flags', () => {
       // est 1000, moe 600 -> CV = 600/1.645/1000 = 36%
-      const out = formatAggregateResponse(
+      const out = formatText(
         baseInput({ rows: manyRows(25, '1000', '600') }),
       )
       expect(out).toContain('[LOW CV=36%]')
@@ -290,40 +300,40 @@ describe('formatAggregateResponse (Copilot/4o shape)', () => {
 
   describe('provenance + freshness', () => {
     it('Source section spells out the ACS 5-year collection window', () => {
-      const out = formatAggregateResponse(baseInput({ year: 2019 }))
+      const out = formatText(baseInput({ year: 2019 }))
       expect(out).toContain('ACS 5-Year Estimates, 2019')
       expect(out).toContain('data collected 2015-2019')
     })
 
     it('echoes the query verbatim in the ## Query section', () => {
-      const out = formatAggregateResponse(baseInput())
+      const out = formatText(baseInput())
       expect(out).toContain(
         'get=NAME,B25001_001E,B25001_001M, dataset=acs/acs5, year=2022',
       )
     })
 
     it('announces auto-paired MOE in the caveats section', () => {
-      const out = formatAggregateResponse(baseInput())
+      const out = formatText(baseInput())
       expect(out).toContain('**MOE AUTO-PAIRED:**')
       expect(out).toContain('B25001_001M')
     })
 
     it('emits DATA FRESHNESS for stale vintages', () => {
-      const out = formatAggregateResponse(
+      const out = formatText(
         baseInput({ year: 2018, currentYear: 2025 }),
       )
       expect(out).toContain('DATA FRESHNESS')
     })
 
     it('does NOT emit DATA FRESHNESS for recent vintages', () => {
-      const out = formatAggregateResponse(
+      const out = formatText(
         baseInput({ year: 2023, currentYear: 2025 }),
       )
       expect(out).not.toContain('DATA FRESHNESS')
     })
 
     it('appends a UTC retrieval timestamp under ## Provenance', () => {
-      const out = formatAggregateResponse(baseInput())
+      const out = formatText(baseInput())
       expect(out).toMatch(/Retrieved: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
     })
   })
