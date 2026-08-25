@@ -6,10 +6,11 @@ import {
   SearchDataTablesArgs,
   SearchDataTablesArgsSchema,
   SearchDataTablesInputSchema,
+  SearchDataTablesOutputSchema,
 } from '../schema/search-data-tables.schema.js'
 
 import { DataTableSearchResultRow } from '../types/data-table.types.js'
-import { ToolContent } from '../types/base.types.js'
+import { ToolCaveat, ToolResponse } from '../types/base.types.js'
 
 export const toolDescription = `Call this BEFORE fetch-aggregate-data to find the right table_id and cell codes; never guess Census cell codes. Searches 32,000+ tables by ID prefix, label, or API endpoint -- pass api_endpoint (e.g. "acs/acs1") when the dataset is known to cut cross-survey noise. Returns table_id, label, component, and the dataset/year combinations each table appears in. Coverage is concentrated in ACS; Economic Census, Geography, and PEP are sparsely indexed.`
 
@@ -23,6 +24,8 @@ export class SearchDataTablesTool extends BaseTool<SearchDataTablesArgs> {
 
   inputSchema: Tool['inputSchema'] =
     SearchDataTablesArgsSchema as unknown as Tool['inputSchema']
+  outputSchema: Tool['inputSchema'] =
+    SearchDataTablesOutputSchema as Tool['inputSchema']
 
   get argsSchema() {
     return SearchDataTablesInputSchema
@@ -54,7 +57,7 @@ export class SearchDataTablesTool extends BaseTool<SearchDataTablesArgs> {
 
   async toolHandler(
     args: SearchDataTablesArgs,
-  ): Promise<{ content: ToolContent[] }> {
+  ): Promise<ToolResponse> {
     try {
       // Check database health first
       const isDbHealthy = await this.dbService.healthCheck()
@@ -76,6 +79,9 @@ export class SearchDataTablesTool extends BaseTool<SearchDataTablesArgs> {
           .filter(Boolean)
           .join(', ')
 
+        // Zero matches is still a successful, schema-conforming result:
+        // this path must emit structuredContent too (total_count 0 = the
+        // search ran and matched a known, complete count of zero).
         return this.createSuccessResponse(
           [
             `## Result`,
@@ -83,16 +89,28 @@ export class SearchDataTablesTool extends BaseTool<SearchDataTablesArgs> {
             ``,
             `Retry with shorter or Census-canonical wording in label_query (e.g. "poverty" over "low income", "tenure" over "renting"), or relax api_endpoint. If you have a table_id prefix, drop the suffix and search by prefix.`,
           ].join('\n'),
+          {
+            query: echoQuery(args, limit),
+            total_count: 0,
+            shown_count: 0,
+            records: [],
+            caveats: [
+              {
+                code: 'NO_MATCH',
+                message: `No data tables matched ${searchTerms}. A miss here means "not indexed under this wording", not "does not exist" -- retry with Census-canonical terms.`,
+              },
+            ],
+          },
         )
       }
 
-      return this.createSuccessResponse(
-        formatDataTableResults({
-          args,
-          results,
-          limit,
-        }),
-      )
+      const formatted = formatDataTableResults({
+        args,
+        results,
+        limit,
+      })
+
+      return this.createSuccessResponse(formatted.text, formatted.structured)
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error occurred'
@@ -104,22 +122,45 @@ export class SearchDataTablesTool extends BaseTool<SearchDataTablesArgs> {
   }
 }
 
+function echoQuery(
+  args: SearchDataTablesArgs,
+  limit: number,
+): Record<string, unknown> {
+  return {
+    data_table_id: args.data_table_id ?? null,
+    label_query: args.label_query ?? null,
+    api_endpoint: args.api_endpoint ?? null,
+    limit,
+  }
+}
+
 // Render results as numbered Record blocks. The data_table_id is the
 // load-bearing field downstream callers need, so it goes first; the
 // dataset/year combinations follow in a compact line.
+// The caveat list is built ONCE and drives both the rendered prose and the
+// structuredContent caveats array, so the two channels cannot drift.
 function formatDataTableResults(opts: {
   args: SearchDataTablesArgs
   results: DataTableSearchResultRow[]
   limit: number
-}): string {
+}): { text: string; structured: Record<string, unknown> } {
   const { args, results, limit } = opts
   const truncated = results.length >= limit
-  const sections: string[] = []
+  const caveats: ToolCaveat[] = []
 
   if (truncated) {
+    caveats.push({
+      code: 'TRUNCATED',
+      message: `returned ${results.length} (the requested limit). More may exist; narrow label_query or pass api_endpoint to filter.`,
+    })
+  }
+
+  const sections: string[] = []
+
+  if (caveats.length > 0) {
     sections.push(
       `## Caveats`,
-      `**TRUNCATED:** returned ${results.length} (the requested limit). More may exist; narrow label_query or pass api_endpoint to filter.`,
+      caveats.map((c) => `**${c.code}:** ${c.message}`).join('\n\n'),
     )
   }
 
@@ -152,5 +193,23 @@ function formatDataTableResults(opts: {
     )
   }
 
-  return sections.join('\n\n')
+  const structured: Record<string, unknown> = {
+    query: echoQuery(args, limit),
+    // Fewer rows than the limit means we saw every match; exactly the
+    // limit means the true total is unmeasured (null), not `limit`.
+    total_count: truncated ? null : results.length,
+    shown_count: results.length,
+    records: results.map((row) => ({
+      data_table_id: row.data_table_id,
+      label: row.label,
+      component: row.component ?? null,
+      datasets: Object.entries(row.datasets).map(([year, endpoints]) => ({
+        year,
+        endpoints,
+      })),
+    })),
+    caveats,
+  }
+
+  return { text: sections.join('\n\n'), structured }
 }

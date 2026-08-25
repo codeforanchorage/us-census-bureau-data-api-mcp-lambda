@@ -36,6 +36,7 @@ vi.mock('../../../src/helpers/citation', () => ({
   buildCitation: vi.fn((url: string) => {
     return `Source: U.S. Census Bureau Data API (${url})`
   }),
+  redactKey: vi.fn((url: string) => url),
 }))
 
 const VARIABLES_FIXTURE = {

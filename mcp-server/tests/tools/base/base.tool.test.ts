@@ -152,6 +152,7 @@ describe('BaseTool', () => {
               text: 'Error: CENSUS_API_KEY is not set.',
             },
           ],
+          isError: true,
         })
       })
 
@@ -168,6 +169,7 @@ describe('BaseTool', () => {
               text: 'Error: CENSUS_API_KEY is not set.',
             },
           ],
+          isError: true,
         })
       })
 
@@ -240,6 +242,7 @@ describe('BaseTool', () => {
               text: 'Unexpected error: Test error from toolHandler method',
             },
           ],
+          isError: true,
         })
       })
     })
@@ -259,6 +262,7 @@ describe('BaseTool', () => {
               text: 'Unexpected error: Test error from toolHandler method',
             },
           ],
+          isError: true,
         })
       })
     })
@@ -302,6 +306,7 @@ describe('BaseTool', () => {
               text: 'Unexpected error: String error',
             },
           ],
+          isError: true,
         })
       })
 
@@ -346,6 +351,7 @@ describe('BaseTool', () => {
               text: 'Unexpected error: Async error',
             },
           ],
+          isError: true,
         })
       })
     })

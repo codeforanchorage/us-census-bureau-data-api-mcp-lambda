@@ -71,4 +71,70 @@ export const SearchDataTablesInputSchema = z
     },
   )
 
+// Schema for structuredContent (emitted as outputSchema in tools/list).
+export const SearchDataTablesOutputSchema = {
+  type: 'object',
+  properties: {
+    query: {
+      type: 'object',
+      description: 'Echo of the search as executed.',
+      properties: {
+        data_table_id: { type: ['string', 'null'] },
+        label_query: { type: ['string', 'null'] },
+        api_endpoint: { type: ['string', 'null'] },
+        limit: { type: 'integer' },
+      },
+      required: ['data_table_id', 'label_query', 'api_endpoint', 'limit'],
+    },
+    total_count: {
+      type: ['integer', 'null'],
+      description:
+        'Total matching tables when known. null means unmeasured: the search returned exactly `limit` rows, so more may exist beyond them. 0 means the search ran and matched nothing.',
+    },
+    shown_count: {
+      type: 'integer',
+      description: 'Number of records included below.',
+    },
+    records: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          data_table_id: { type: 'string' },
+          label: { type: 'string' },
+          component: { type: ['string', 'null'] },
+          datasets: {
+            type: 'array',
+            description:
+              'Dataset/vintage combinations the table appears in. Years are strings, not numbers.',
+            items: {
+              type: 'object',
+              properties: {
+                year: { type: 'string' },
+                endpoints: { type: 'array', items: { type: 'string' } },
+              },
+              required: ['year', 'endpoints'],
+            },
+          },
+        },
+        required: ['data_table_id', 'label', 'component', 'datasets'],
+      },
+    },
+    caveats: {
+      type: 'array',
+      description:
+        'Machine-readable qualifications; every message also appears in the text content.',
+      items: {
+        type: 'object',
+        properties: {
+          code: { type: 'string' },
+          message: { type: 'string' },
+        },
+        required: ['code', 'message'],
+      },
+    },
+  },
+  required: ['query', 'total_count', 'shown_count', 'records', 'caveats'],
+}
+
 export type SearchDataTablesArgs = z.infer<typeof SearchDataTablesInputSchema>

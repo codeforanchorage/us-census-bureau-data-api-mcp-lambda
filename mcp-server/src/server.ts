@@ -2,6 +2,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   CallToolRequestSchema,
+  CallToolResult,
   GetPromptRequestSchema,
   ListPromptsRequestSchema,
   ListToolsRequestSchema,
@@ -41,7 +42,9 @@ export class MCPServer {
     })
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      return await this.handleToolCall(request)
+      // Our ToolResponse is structurally a CallToolResult; the SDK's
+      // passthrough zod type just can't see that through an interface.
+      return (await this.handleToolCall(request)) as CallToolResult
     })
 
     // Prompt handlers
@@ -63,6 +66,9 @@ export class MCPServer {
         title: tool.title,
         description: tool.description,
         inputSchema: tool.inputSchema,
+        // Omit outputSchema entirely for tools that do not declare one --
+        // an empty/placeholder schema would be a binding promise.
+        ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
         annotations: READ_ONLY_ANNOTATIONS,
       })),
     }

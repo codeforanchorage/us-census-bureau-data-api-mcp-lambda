@@ -16,11 +16,12 @@ import {
   VariablesIndex,
 } from '../helpers/variables-cache.js'
 import {
+  FetchAggregateDataOutputSchema,
   FetchAggregateDataToolSchema,
   TableArgs,
   TableSchema,
 } from '../schema/fetch-aggregate-data.schema.js'
-import { ToolContent } from '../types/base.types.js'
+import { ToolResponse } from '../types/base.types.js'
 
 import {
   datasetValidator,
@@ -37,6 +38,8 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
   title = 'Fetch Aggregate Data'
   description = toolDescription
   inputSchema: Tool['inputSchema'] = TableSchema as Tool['inputSchema']
+  outputSchema: Tool['inputSchema'] =
+    FetchAggregateDataOutputSchema as Tool['inputSchema']
   readonly requiresApiKey = true
 
   get argsSchema() {
@@ -70,10 +73,7 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
     return this.argsSchema.safeParse(input)
   }
 
-  async toolHandler(
-    args: TableArgs,
-    apiKey: string,
-  ): Promise<{ content: ToolContent[] }> {
+  async toolHandler(args: TableArgs, apiKey: string): Promise<ToolResponse> {
     // Reject unbounded national wildcards before paying for anything. The
     // 100-record cap is display-side only -- the full payload is still
     // fetched from the Census API -- so a nationwide county:*/tract:* call
@@ -305,13 +305,22 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
         headers,
         rows,
         queryEcho,
+        queryParams: {
+          dataset: args.dataset,
+          year: args.year,
+          get: getParams,
+          for: args.for ?? null,
+          in: args.in ?? null,
+          ucgid: args.ucgid ?? null,
+          predicates: args.predicates ?? null,
+        },
         requestedVariables,
         autoAddedMoeFields,
         variablesIndex: variablesIndex as VariablesIndex | null,
         currentYear: new Date().getUTCFullYear(),
       })
 
-      return this.createSuccessResponse(formatted)
+      return this.createSuccessResponse(formatted.text, formatted.structured)
     } catch (err) {
       return this.createErrorResponse(`Fetch failed: ${(err as Error).message}`)
     }
