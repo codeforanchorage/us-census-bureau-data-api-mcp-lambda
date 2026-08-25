@@ -7,6 +7,27 @@ type QueryParam = string | number | boolean | null | Date | Buffer | string[]
 
 const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME
 
+// Postgres error code for a statement cancelled by statement_timeout.
+const QUERY_CANCELLED = '57014'
+
+// Driver errors leak schema, credentials and topology ("password
+// authentication failed for user ...", relation names, host:port), and the
+// tools put error messages straight into tool results a caller sees. Log
+// the real error for the operator (console.error survives the DEBUG_LOGS
+// suppression) and hand the caller a clean, actionable sentence.
+function sanitizeDbError(err: unknown): Error {
+  console.error('Database query failed:', err)
+  const code = (err as { code?: string })?.code
+  if (code === QUERY_CANCELLED) {
+    return new Error(
+      'The database query timed out. Narrow the query (fewer rows, tighter filters) and retry.',
+    )
+  }
+  return new Error(
+    'The database is temporarily unavailable. Retry after a short delay.',
+  )
+}
+
 export class DatabaseService {
   private static instance: DatabaseService
   private pool: Pool
@@ -77,15 +98,23 @@ export class DatabaseService {
     return await this.pool.connect()
   }
 
-  // Execute a single query using a pooled connection
+  // Execute a single query using a pooled connection. Driver errors are
+  // sanitized (and logged in full) before they can reach a tool result.
   public async query<T = unknown>(
     text: string,
     params?: QueryParam[],
   ): Promise<{ rows: T[] }> {
-    const client = await this.pool.connect()
+    let client: PoolClient
+    try {
+      client = await this.pool.connect()
+    } catch (err) {
+      throw sanitizeDbError(err)
+    }
     try {
       const result = await client.query(text, params)
       return result
+    } catch (err) {
+      throw sanitizeDbError(err)
     } finally {
       client.release() // Return client to pool
     }

@@ -74,6 +74,10 @@ export abstract class BaseTool<Args extends object> implements MCPTool<Args> {
 
       return await this.toolHandler(args, apiKey)
     } catch (err) {
+      // Log the full error for the operator (console.error survives the
+      // DEBUG_LOGS suppression); the caller gets the message only. DB
+      // driver errors were already sanitized in DatabaseService.query.
+      console.error(`Tool ${this.name} failed:`, err)
       const errorMessage = err instanceof Error ? err.message : String(err)
       return this.createErrorResponse(`Unexpected error: ${errorMessage}`)
     }

@@ -386,12 +386,20 @@ async function dispatch(
 
     return jsonResponse(200, { jsonrpc: '2.0', id, result })
   } catch (err) {
+    // Caller mistakes (bad params, unknown tool) are warnings, not server
+    // faults: console.warn is suppressed in prod (DEBUG_LOGS=false), so
+    // CloudWatch stays quiet enough for real faults to be findable.
     if (err instanceof McpError) {
+      console.warn(`Caller error on ${method}: ${err.message}`)
       return errorResponse(id, err.code, err.message)
     }
     if (err instanceof z.ZodError) {
+      console.warn(`Invalid params on ${method}: ${err.message}`)
       return errorResponse(id, ErrorCode.InvalidParams, err.message)
     }
+    // Genuine faults keep the full error (console.error survives the
+    // DEBUG_LOGS suppression).
+    console.error(`Internal error on ${method}:`, err)
     const message = err instanceof Error ? err.message : String(err)
     return errorResponse(id, -32603, `Internal error: ${message}`)
   }
