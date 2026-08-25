@@ -217,11 +217,38 @@ To run tests, navigate to the `mcp-db/` directory and run `npm run test`.
 The MCP server exposes several methods: `tools/list`, `tools/call`, `prompts/list`, and `prompts/get`.
 
 ## Available Tools
-This section covers tools that can be called.
+This section covers tools that can be called. The guided discovery flow is
+`list-survey-programs` → `list-survey-components` → `search-data-tables` →
+`fetch-dataset-geography` → `resolve-geography-fips` → `fetch-aggregate-data`.
+Every tool declares an `outputSchema` and returns `structuredContent`
+alongside its text, including machine-readable caveats with stable codes.
+
+### List Survey Programs
+The `list-survey-programs` tool returns all ~30 Census Bureau survey programs
+(ACS, Decennial, CPS, ...) with a count of indexed data tables each. It is the
+recommended starting point for orientation. A program with `table_count: 0`
+has nothing indexed in `search-data-tables` — not necessarily no data. \
+It requires no arguments.
+
+### List Survey Components
+The `list-survey-components` tool expands a program acronym into its concrete
+components. Each record carries the `api_endpoint` to pass to
+`search-data-tables` (as `api_endpoint`) and to `fetch-aggregate-data` /
+`fetch-dataset-geography` (as `dataset`), plus the published vintage range,
+whether that range has gaps, and release frequency. It accepts the following
+argument:
+* Program String (Required) - The program acronym from `list-survey-programs`, e.g. `ACS` (case-insensitive)
 
 ### List Datasets
-The `list-datasets` tool is used for fetching a subset of metadata for all datasets that are available in the Census Bureau's API. \
+The `list-datasets` tool is used for fetching a subset of metadata for all datasets that are available in the Census Bureau's API (~1,700 entries, including every published vintage). Prefer the programs/components flow above for orientation; use this for the complete vintage list. \
 It requires no arguments.
+
+### Search Data Tables
+The `search-data-tables` tool searches 32,000+ Census tables by ID prefix, label, or API endpoint to find the correct `table_id` and cell codes before calling `fetch-aggregate-data`. It accepts the following arguments (at least one of the first three is required):
+* Data Table ID (Optional) - Table ID or prefix, e.g. `B16005`
+* Label Query (Optional) - Natural-language phrase matched against table labels, e.g. `language spoken at home`
+* API Endpoint (Optional) - Scope results to one dataset, e.g. `acs/acs1`
+* Limit (Optional) - Maximum results to return (default `20`)
 
 ### Fetch Dataset Geography
 The `fetch-dataset-geography` tool is used for fetching available geography levels for filtering a given dataset. It accepts the following arguments:
