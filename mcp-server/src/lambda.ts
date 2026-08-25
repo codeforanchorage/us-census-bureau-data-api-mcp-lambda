@@ -18,6 +18,7 @@ import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js'
 import { createServer } from './createServer.js'
 import { MCPServer } from './server.js'
 import { DatabaseService } from './services/database.service.js'
+import { SERVER_NAME, SERVER_VERSION } from './version.js'
 
 type LambdaEvent = {
   version?: string
@@ -52,7 +53,38 @@ const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Expose-Headers': 'x-request-id, mcp-session-id',
 }
 
-const PROTOCOL_VERSION = '2024-11-05'
+// Protocol revisions this server speaks, newest first. The tools/prompts
+// wire format is identical across all four -- each newer revision's
+// additions (elicitation, structured-output extras, tasks) are optional
+// and unused here -- so supporting a revision means nothing more than
+// echoing it back in the initialize negotiation. 2024-11-05 stays in the
+// list deliberately: M365 Copilot (GCC) is a first-class consumer and its
+// connector still opens with the oldest revision.
+//
+// Do NOT add 2026-07-28. That revision replaces the initialize handshake
+// with per-request _meta plus a mandatory server/discover RPC -- adopting
+// it is a dual-era transport migration, not a version-string addition.
+const SUPPORTED_PROTOCOL_VERSIONS = [
+  '2025-11-25',
+  '2025-06-18',
+  '2025-03-26',
+  '2024-11-05',
+] as const
+const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]
+
+function isSupportedProtocolVersion(version: string): boolean {
+  return (SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(version)
+}
+
+// Spec negotiation: echo the client's requested revision when we support
+// it; otherwise answer with the latest we do support and let the client
+// decide whether to proceed.
+function negotiateProtocolVersion(requested: unknown): string {
+  if (typeof requested === 'string' && isSupportedProtocolVersion(requested)) {
+    return requested
+  }
+  return LATEST_PROTOCOL_VERSION
+}
 
 let serverPromise: Promise<MCPServer> | null = null
 
@@ -191,18 +223,47 @@ function logUsage(
   )
 }
 
+function getHeader(event: LambdaEvent, name: string): string | undefined {
+  return Object.entries(event.headers ?? {}).find(
+    ([headerName]) => headerName.toLowerCase() === name,
+  )?.[1]
+}
+
 function getSessionId(
   event: LambdaEvent,
   method: string | undefined,
 ): string | undefined {
-  const fromHeader = Object.entries(event.headers ?? {}).find(
-    ([name]) => name.toLowerCase() === 'mcp-session-id',
-  )?.[1]
+  const fromHeader = getHeader(event, 'mcp-session-id')
 
   // Streamable HTTP: the server assigns a session id at initialization (via
   // the mcp-session-id response header) and clients echo it on every
   // subsequent request.
   return fromHeader ?? (method === 'initialize' ? randomUUID() : undefined)
+}
+
+// Since revision 2025-06-18, Streamable HTTP clients send an
+// MCP-Protocol-Version header on every post-handshake request. Absent means
+// an older client -- the spec says assume 2025-03-26, which we support, so
+// pass through untouched. Present but unrecognized gets HTTP 400 with a
+// JSON-RPC -32600 -- deliberately NOT the 2026-07-28-era -32022
+// UnsupportedProtocolVersionError, which would make a dual-era client retry
+// the new server/discover handshake; 400/-32600 makes it read us as a
+// legacy server and fall back to initialize, which is what we support.
+function checkProtocolVersionHeader(
+  event: LambdaEvent,
+  id: string | number | null | undefined,
+): LambdaResponse | null {
+  const requested = getHeader(event, 'mcp-protocol-version')
+  if (requested === undefined || isSupportedProtocolVersion(requested)) {
+    return null
+  }
+  return errorResponse(
+    id ?? null,
+    -32600,
+    `Unsupported MCP-Protocol-Version: ${requested}. ` +
+      `Supported versions: ${SUPPORTED_PROTOCOL_VERSIONS.join(', ')}.`,
+    400,
+  )
 }
 
 function errorResponse(
@@ -237,9 +298,12 @@ async function dispatch(
     switch (method) {
       case 'initialize':
         result = {
-          protocolVersion: PROTOCOL_VERSION,
+          protocolVersion: negotiateProtocolVersion(
+            (params as { protocolVersion?: unknown } | undefined)
+              ?.protocolVersion,
+          ),
           capabilities: { tools: {}, prompts: {} },
-          serverInfo: { name: 'census-api', version: '0.1.0' },
+          serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
         }
         break
 
@@ -321,6 +385,11 @@ export async function handler(event: LambdaEvent): Promise<LambdaResponse> {
     parsed = rawBody ? (JSON.parse(rawBody) as JsonRpcRequest) : {}
   } catch {
     return errorResponse(null, -32700, 'Parse error: invalid JSON')
+  }
+
+  const versionRejection = checkProtocolVersionHeader(event, parsed.id)
+  if (versionRejection) {
+    return versionRejection
   }
 
   const sessionId = getSessionId(event, parsed.method)

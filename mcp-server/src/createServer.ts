@@ -7,9 +7,10 @@ import { ResolveGeographyFipsTool } from './tools/resolve-geography-fips.tool.js
 import { SearchDataTablesTool } from './tools/search-data-tables.tool.js'
 
 import { PopulationPrompt } from './prompts/population.prompt.js'
+import { SERVER_NAME, SERVER_VERSION } from './version.js'
 
 export function createServer(): MCPServer {
-  const mcpServer = new MCPServer('census-api', '0.1.0')
+  const mcpServer = new MCPServer(SERVER_NAME, SERVER_VERSION)
 
   mcpServer.registerPrompt(new PopulationPrompt())
 
