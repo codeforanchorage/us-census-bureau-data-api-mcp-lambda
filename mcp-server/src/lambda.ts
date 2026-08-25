@@ -46,11 +46,52 @@ type JsonRpcRequest = {
   params?: unknown
 }
 
+// Browser origins allowed to drive this server. This is the Streamable
+// HTTP transport's DNS-rebinding defence: a disallowed Origin gets HTTP
+// 403, on the POST path AND the OPTIONS preflight -- merely withholding
+// CORS headers is not the same thing as refusing the request. Requests
+// with no Origin header (native MCP clients, curl, Lambda console tests)
+// are unaffected and stay allowed.
+const ALLOWED_ORIGINS = new Set([
+  'https://claude.ai',
+  'https://claude.com',
+  // MCP Inspector's local dev proxy.
+  'http://localhost:6274',
+  'http://127.0.0.1:6274',
+])
+
+// Access-Control-Allow-Origin is added per-response by applyCorsOrigin --
+// it echoes the (allowed) requesting origin instead of '*'.
 const CORS_HEADERS: Record<string, string> = {
-  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'content-type, mcp-session-id',
+  'Access-Control-Allow-Headers':
+    'content-type, mcp-session-id, mcp-protocol-version',
   'Access-Control-Expose-Headers': 'x-request-id, mcp-session-id',
+}
+
+function applyCorsOrigin(
+  response: LambdaResponse,
+  origin: string | undefined,
+): LambdaResponse {
+  if (origin !== undefined) {
+    response.headers['Access-Control-Allow-Origin'] = origin
+    response.headers['Vary'] = 'Origin'
+  }
+  return response
+}
+
+function originRejection(origin: string): LambdaResponse {
+  // Deliberately no CORS headers: the browser must treat this as a
+  // cross-origin failure, and the 403 stops non-CORS-enforcing callers too.
+  return {
+    statusCode: 403,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32600, message: `Origin not allowed: ${origin}` },
+    }),
+  }
 }
 
 // Protocol revisions this server speaks, newest first. The tools/prompts
@@ -357,6 +398,14 @@ async function dispatch(
 }
 
 export async function handler(event: LambdaEvent): Promise<LambdaResponse> {
+  const origin = getHeader(event, 'origin')
+  if (origin !== undefined && !ALLOWED_ORIGINS.has(origin)) {
+    return originRejection(origin)
+  }
+  return applyCorsOrigin(await routeRequest(event), origin)
+}
+
+async function routeRequest(event: LambdaEvent): Promise<LambdaResponse> {
   const { method, path } = extractMethodAndPath(event)
 
   if (method === 'OPTIONS') {
