@@ -3,8 +3,27 @@ import { z } from 'zod'
 
 import { ToolContent } from '../types/base.types.js'
 
+// Behaviour hints shown to clients in tools/list. Every tool here is a
+// read-only query, so the annotations are uniform. idempotentHint is
+// deliberately absent: the MCP schema defines it as meaningful only when
+// readOnlyHint is false, so emitting it alongside readOnlyHint: true would
+// be noise at best and contradictory at worst (pinned by a test).
+export const READ_ONLY_ANNOTATIONS: {
+  readOnlyHint: boolean
+  openWorldHint: boolean
+} = {
+  readOnlyHint: true,
+  // All five tools ultimately answer from the Census Bureau's published
+  // data (directly or via our seeded copy of it), an external system.
+  openWorldHint: true,
+}
+
 export interface MCPTool<Args extends object = object> {
   name: string
+  // Human-readable display name. Clients resolve display precedence as
+  // title -> annotations.title -> name; without it, UIs fall back to the
+  // wire identifier (e.g. "fetch-aggregate-data").
+  title: string
   description: string
   inputSchema: Tool['inputSchema']
   argsSchema: z.ZodSchema<Args, z.ZodTypeDef, Args>
@@ -13,6 +32,7 @@ export interface MCPTool<Args extends object = object> {
 
 interface StoredMCPTool {
   name: string
+  title: string
   description: string
   inputSchema: Tool['inputSchema']
   argsSchema: z.ZodSchema<object, z.ZodTypeDef, object>
@@ -21,6 +41,7 @@ interface StoredMCPTool {
 
 export abstract class BaseTool<Args extends object> implements MCPTool<Args> {
   abstract name: string
+  abstract title: string
   abstract description: string
   abstract inputSchema: Tool['inputSchema']
   abstract get argsSchema(): z.ZodType<Args, z.ZodTypeDef, Args>
@@ -80,6 +101,7 @@ export class ToolRegistry {
     // Store as type-erased version
     const storedTool: StoredMCPTool = {
       name: tool.name,
+      title: tool.title,
       description: tool.description,
       inputSchema: tool.inputSchema,
       argsSchema: tool.argsSchema as z.ZodSchema<object, z.ZodTypeDef, object>,

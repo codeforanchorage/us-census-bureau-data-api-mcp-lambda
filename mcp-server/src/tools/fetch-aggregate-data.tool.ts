@@ -34,6 +34,7 @@ const CENSUS_VARIABLE_LIMIT = 50
 
 export class FetchAggregateDataTool extends BaseTool<TableArgs> {
   name = 'fetch-aggregate-data'
+  title = 'Fetch Aggregate Data'
   description = toolDescription
   inputSchema: Tool['inputSchema'] = TableSchema as Tool['inputSchema']
   readonly requiresApiKey = true

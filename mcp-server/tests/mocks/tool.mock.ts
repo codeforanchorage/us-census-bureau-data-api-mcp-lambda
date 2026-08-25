@@ -4,6 +4,7 @@ import { z } from 'zod'
 
 export class ErrorThrowingTool extends BaseTool<{ message: string }> {
   name = 'error-tool' as const
+  title = 'Error Tool'
   description = 'A tool that throws errors'
 
   inputSchema: Tool['inputSchema'] = {
@@ -27,6 +28,7 @@ export class ErrorThrowingTool extends BaseTool<{ message: string }> {
 
 export class MockFetchSummaryTableTool extends BaseTool<{ message: string }> {
   name = 'fetch-summary-table-mock' as const
+  title = 'Fetch Summary Table Mock'
   description = 'A test tool for unit testing'
 
   inputSchema: Tool['inputSchema'] = {

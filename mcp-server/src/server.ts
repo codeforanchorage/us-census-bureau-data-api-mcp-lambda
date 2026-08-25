@@ -10,7 +10,11 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import { MCPPrompt, PromptRegistry } from './prompts/base.prompt.js'
-import { MCPTool, ToolRegistry } from './tools/base.tool.js'
+import {
+  MCPTool,
+  READ_ONLY_ANNOTATIONS,
+  ToolRegistry,
+} from './tools/base.tool.js'
 
 export class MCPServer {
   private server: Server
@@ -54,8 +58,12 @@ export class MCPServer {
     return {
       tools: this.toolRegistry.getAll().map((tool) => ({
         name: tool.name,
+        // Top-level title (2025-06-18+), not annotations.title: clients
+        // resolve display precedence as title -> annotations.title -> name.
+        title: tool.title,
         description: tool.description,
         inputSchema: tool.inputSchema,
+        annotations: READ_ONLY_ANNOTATIONS,
       })),
     }
   }

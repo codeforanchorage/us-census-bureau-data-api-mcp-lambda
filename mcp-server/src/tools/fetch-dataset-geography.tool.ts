@@ -20,6 +20,7 @@ export const toolDescription = `Call this BEFORE fetch-aggregate-data to confirm
 
 export class FetchDatasetGeographyTool extends BaseTool<FetchDatasetGeographyArgs> {
   name = 'fetch-dataset-geography'
+  title = 'Fetch Dataset Geography'
   description = toolDescription
   readonly requiresApiKey = true
 

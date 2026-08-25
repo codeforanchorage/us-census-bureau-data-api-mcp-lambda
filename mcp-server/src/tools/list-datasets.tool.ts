@@ -29,6 +29,7 @@ export function clearCatalogCache(): void {
 
 export class ListDatasetsTool extends BaseTool<object> {
   name = 'list-datasets'
+  title = 'List Datasets'
   description = toolDescription
   readonly requiresApiKey = true
 

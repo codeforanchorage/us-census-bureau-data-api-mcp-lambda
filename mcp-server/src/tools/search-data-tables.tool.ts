@@ -15,6 +15,7 @@ export const toolDescription = `Call this BEFORE fetch-aggregate-data to find th
 
 export class SearchDataTablesTool extends BaseTool<SearchDataTablesArgs> {
   name = 'search-data-tables'
+  title = 'Search Data Tables'
   description = toolDescription
   readonly requiresApiKey = false
 

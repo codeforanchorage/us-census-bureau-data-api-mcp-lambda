@@ -15,6 +15,7 @@ import { ToolContent } from '../types/base.types.js'
 export const toolDescription = `Call this to convert a place name into Census FIPS codes; never guess FIPS digits. Accepts a natural-language geography_name (e.g. "Philadelphia", "Cook County") and an optional summary_level filter. Returns FIPS codes, for/in query strings for fetch-aggregate-data, available vintages, and parent-geography hierarchy.`
 export class ResolveGeographyFipsTool extends BaseTool<ResolveGeographyFipsArgs> {
   name = 'resolve-geography-fips'
+  title = 'Resolve Geography FIPS'
   description = toolDescription
   readonly requiresApiKey = false
 
