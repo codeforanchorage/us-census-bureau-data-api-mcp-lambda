@@ -17,7 +17,7 @@ import {
   ParsedGeographyEntry,
 } from '../types/summary-level.types.js'
 
-export const toolDescription = `Call this BEFORE fetch-aggregate-data to confirm which geographic levels the dataset supports; do not assume tract or block-group data is available (a 1-year ACS does not publish tract data). Returns query syntax, FIPS codes, and parent-geography hierarchy per level.`
+export const toolDescription = `Call this BEFORE fetch-aggregate-data to confirm which geographic levels the dataset supports; do not assume tract or block-group data is available (a 1-year ACS does not publish tract data). Returns, per level, the for=/in= query syntax and an example, the 3-digit summary level code, the parent geographies it requires in in=, whether wildcards are allowed, and its hierarchy.`
 
 export class FetchDatasetGeographyTool extends BaseTool<FetchDatasetGeographyArgs> {
   name = 'fetch-dataset-geography'
@@ -186,14 +186,6 @@ export class FetchDatasetGeographyTool extends BaseTool<FetchDatasetGeographyArg
     apiKey: string,
   ): Promise<ToolResponse> {
     try {
-      // Check database health first
-      const isDbHealthy = await this.dbService.healthCheck()
-      if (!isDbHealthy) {
-        return this.createErrorResponse(
-          'Database connection failed; cannot retrieve geography metadata. Retry once the local mcp-db container is up.',
-        )
-      }
-
       // Get geography levels from database
       const geographyLevels = await this.getSummaryLevels()
 
@@ -274,8 +266,13 @@ export class FetchDatasetGeographyTool extends BaseTool<FetchDatasetGeographyArg
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error occurred'
 
+      // Database and timeout errors already carry retry advice; a raw
+      // network error from api.census.gov does not.
+      const advice = /retry/i.test(errorMessage)
+        ? ''
+        : ' Retry after a short delay.'
       return this.createErrorResponse(
-        `Failed to fetch dataset geography levels: ${errorMessage}. Retry once network connectivity to api.census.gov is restored.`,
+        `Failed to fetch dataset geography levels: ${errorMessage}${advice}`,
       )
     }
   }

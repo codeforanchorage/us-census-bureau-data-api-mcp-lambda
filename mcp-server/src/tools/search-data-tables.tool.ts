@@ -59,14 +59,6 @@ export class SearchDataTablesTool extends BaseTool<SearchDataTablesArgs> {
     args: SearchDataTablesArgs,
   ): Promise<ToolResponse> {
     try {
-      // Check database health first
-      const isDbHealthy = await this.dbService.healthCheck()
-      if (!isDbHealthy) {
-        return this.createErrorResponse(
-          'Database connection failed; cannot search data tables. Retry once the local mcp-db container is up.',
-        )
-      }
-
       const results = await this.searchDataTables(args)
       const limit = args.limit ?? 20
 
@@ -116,7 +108,7 @@ export class SearchDataTablesTool extends BaseTool<SearchDataTablesArgs> {
         error instanceof Error ? error.message : 'Unknown error occurred'
 
       return this.createErrorResponse(
-        `Failed to search data tables: ${errorMessage}. Retry after a brief delay; if the failure persists, the local mcp-db service may be down.`,
+        `Failed to search data tables: ${errorMessage}`,
       )
     }
   }

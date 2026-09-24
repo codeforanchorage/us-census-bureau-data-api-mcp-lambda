@@ -409,11 +409,37 @@ async function structuredChecks() {
   )
 }
 
+async function promptsChecks() {
+  console.log('\n== prompts ==')
+  const list = await post(rpc(50, 'prompts/list'))
+  const prompts = list.json?.result?.prompts ?? []
+  check(
+    'lists get_population_data and compare_places, each with a title',
+    ['get_population_data', 'compare_places'].every((name) =>
+      prompts.some((p) => p.name === name && typeof p.title === 'string'),
+    ),
+    prompts.map((p) => p.name).join(','),
+  )
+  const got = await post(
+    rpc(51, 'prompts/get', {
+      name: 'compare_places',
+      arguments: { topic: 'median household income', places: 'Anchorage, Juneau' },
+    }),
+  )
+  check(
+    'compare_places renders a workflow naming list-table-variables',
+    (got.json?.result?.messages?.[0]?.content?.text ?? '').includes(
+      'list-table-variables',
+    ),
+  )
+}
+
 async function main() {
   console.log(`Census MCP smoke test against ${BASE_URL}`)
   await transportChecks()
   await initializeChecks()
   await toolsListChecks()
+  await promptsChecks()
   await structuredChecks()
   console.log(`\n${passes} passed, ${failures} failed`)
   process.exit(failures > 0 ? 1 : 0)

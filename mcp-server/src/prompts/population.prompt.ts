@@ -6,6 +6,7 @@ export class PopulationPrompt extends BasePrompt<
   z.infer<typeof PopulationArgsSchema>
 > {
   name = 'get_population_data'
+  title = 'Population of a Place'
   description =
     'Get official current population data for any US geographic area using U.S. Census Bureau Data'
 

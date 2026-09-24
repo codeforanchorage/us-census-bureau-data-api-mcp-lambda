@@ -3,6 +3,9 @@ import { Prompt } from '@modelcontextprotocol/sdk/types.js'
 
 export interface MCPPrompt<Args extends object = object> {
   name: string
+  // Human-readable display name (2025-06-18+). Clients show title when
+  // present and fall back to the wire name.
+  title?: string
   description: string
   arguments?: Prompt['arguments']
   argsSchema: z.ZodSchema<Args, z.ZodTypeDef, Args>
@@ -17,6 +20,7 @@ export interface MCPPrompt<Args extends object = object> {
 
 interface StoredMCPPrompt {
   name: string
+  title?: string
   description: string
   arguments?: Prompt['arguments']
   argsSchema: z.ZodSchema<object, z.ZodTypeDef, object>
@@ -33,6 +37,7 @@ export abstract class BasePrompt<Args extends object>
   implements MCPPrompt<Args>
 {
   abstract name: string
+  title?: string
   abstract description: string
   abstract arguments?: Prompt['arguments']
   abstract get argsSchema(): z.ZodType<Args, z.ZodTypeDef, Args>
@@ -77,6 +82,7 @@ export class PromptRegistry {
     // Store as type-erased version
     const storedPrompt: StoredMCPPrompt = {
       name: prompt.name,
+      title: prompt.title,
       description: prompt.description,
       arguments: prompt.arguments,
       argsSchema: prompt.argsSchema as z.ZodSchema<

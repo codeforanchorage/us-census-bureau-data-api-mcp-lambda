@@ -127,20 +127,24 @@ describe('ResolveGeographyFipsTool', () => {
   })
 
   describe('Database Integration', () => {
-    it('should check database health', async () => {
+    it('should not spend a round trip on a separate health check', async () => {
       await tool.handler(defaultArgs)
 
-      expect(mockDbService.healthCheck).toHaveBeenCalled()
+      expect(mockDbService.healthCheck).not.toHaveBeenCalled()
+      expect(mockDbService.query).toHaveBeenCalledOnce()
     })
 
-    it('should return error when database is unhealthy', async () => {
-      mockDbService.healthCheck.mockResolvedValue(false)
+    it('should pass the sanitized database error through without stale advice', async () => {
+      mockDbService.query.mockRejectedValue(
+        new Error(
+          'The database is temporarily unavailable. Retry after a short delay.',
+        ),
+      )
 
       const response = await tool.handler(defaultArgs)
-      validateResponseStructure(response)
-      expect(response.content[0].text).toContain('Database connection failed')
-      expect(response.content[0].text).toContain(
-        'cannot retrieve geography metadata',
+      expect(response.isError).toBe(true)
+      expect(response.content[0].text).toBe(
+        'Failed to resolve geography: The database is temporarily unavailable. Retry after a short delay.',
       )
     })
 

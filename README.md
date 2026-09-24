@@ -290,6 +290,11 @@ This section covers prompts that can be called. According to the [Model Context 
 This `get_population_data` prompt retrieves population statistics for US states, counties, cities, and other geographic areas. It resolves geographic names to their corresponding FIPS codes before fetching data. This prompt accepts the following argument:
 - `geography_name` (required): Name of the geographic area (state, county, city, etc.)
 
+### Compare Places
+This `compare_places` prompt compares one statistic (income, poverty, housing, ...) across several places. It walks through the full workflow: resolving each place, finding the table and its cell codes, and fetching 5-year ACS data. It asks for results with margins of error and treats two places as different only when their ranges do not overlap. This prompt accepts the following arguments:
+- `topic` (required): What to compare, e.g. `median household income`
+- `places` (required): The places to compare, comma-separated, e.g. `Anchorage, Fairbanks, Juneau`
+
 ## Helper Scripts
 
 For easier command-line usage, this project includes bash helper scripts in the `scripts/dev` directory that wrap the complex Docker commands and handle the `CENSUS_API_KEY` parameter automatically.

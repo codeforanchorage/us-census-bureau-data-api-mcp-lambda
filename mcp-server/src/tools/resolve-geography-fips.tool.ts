@@ -13,7 +13,7 @@ import { GeographySearchResultRow } from '../types/geography.types.js'
 import { SummaryLevelRow } from '../types/summary-level.types.js'
 import { ToolCaveat, ToolResponse } from '../types/base.types.js'
 
-export const toolDescription = `Call this to convert a place name into Census FIPS codes; never guess FIPS digits. Accepts a natural-language geography_name (e.g. "Philadelphia", "Cook County") and an optional summary_level filter. Returns FIPS codes, for/in query strings for fetch-aggregate-data, available vintages, and parent-geography hierarchy.`
+export const toolDescription = `Call this to convert a place name into Census FIPS codes; never guess FIPS digits. Accepts a natural-language geography_name (e.g. "Philadelphia", "Cook County") and an optional summary_level filter. Returns, for each match, its official name, summary level, and centroid, plus the for/in query strings (carrying the FIPS codes) to pass straight to fetch-aggregate-data.`
 export class ResolveGeographyFipsTool extends BaseTool<ResolveGeographyFipsArgs> {
   name = 'resolve-geography-fips'
   title = 'Resolve Geography FIPS'
@@ -69,18 +69,8 @@ export class ResolveGeographyFipsTool extends BaseTool<ResolveGeographyFipsArgs>
     return result.rows
   }
 
-  async toolHandler(
-    args: ResolveGeographyFipsArgs,
-  ): Promise<ToolResponse> {
+  async toolHandler(args: ResolveGeographyFipsArgs): Promise<ToolResponse> {
     try {
-      // Check database health first
-      const isDbHealthy = await this.dbService.healthCheck()
-      if (!isDbHealthy) {
-        return this.createErrorResponse(
-          'Database connection failed; cannot retrieve geography metadata. Retry once the local mcp-db container is up.',
-        )
-      }
-
       let result: GeographySearchResultRow[]
       let summaryLevelResolved: string | null = null
 
@@ -110,10 +100,12 @@ export class ResolveGeographyFipsTool extends BaseTool<ResolveGeographyFipsArgs>
           [
             `## Result`,
             `No geographies matched "${args.geography_name}"${
-              args.summary_level ? ` at summary level "${args.summary_level}"` : ''
+              args.summary_level
+                ? ` at summary level "${args.summary_level}"`
+                : ''
             }.`,
             ``,
-            `Retry with a broader geography_name (drop modifiers like "city" or "County"), or omit summary_level entirely. If the spelling is uncertain, search the canonical Census place name in list-datasets or fetch-dataset-geography output first.`,
+            `Retry with a broader geography_name (drop modifiers like "city" or "County"), or omit summary_level entirely. Names are fuzzy-matched against official Census names such as "Cook County, Illinois", so a shorter distinctive part of the name usually works better than a longer description.`,
           ].join('\n'),
           {
             query: {
@@ -153,7 +145,7 @@ export class ResolveGeographyFipsTool extends BaseTool<ResolveGeographyFipsArgs>
         error instanceof Error ? error.message : 'Unknown error occurred'
 
       return this.createErrorResponse(
-        `Failed to resolve geography: ${errorMessage}. Retry after confirming the local mcp-db service is reachable.`,
+        `Failed to resolve geography: ${errorMessage}`,
       )
     }
   }
