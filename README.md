@@ -29,7 +29,7 @@ The *U.S. Census Bureau Data API MCP* is a [Model Context Protocol (MCP)](https:
 This fork ports the stdio MCP server to a public HTTP endpoint backed by AWS
 Lambda + RDS Postgres, patterned after [CityOfBoston/OpenContext](https://github.com/CityOfBoston/OpenContext).
 
-**Architecture.** `POST /mcp` → API Gateway REST API → Lambda (Node 20, zip
+**Architecture.** `POST /mcp` → API Gateway REST API → Lambda (Node 22, zip
 package) → RDS Postgres (public subnet, SSL required). Lambda is NOT inside a
 VPC — it reaches RDS and `api.census.gov` over the public internet to avoid a
 NAT Gateway (~$32/mo). RDS is public-subnet with SG `0.0.0.0/0:5432`; protection
