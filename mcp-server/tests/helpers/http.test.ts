@@ -37,6 +37,22 @@ describe('fetchWithTimeout', () => {
     ).rejects.toThrow(/timed out after 1s/)
   })
 
+  it('redacts the API key from network error messages', async () => {
+    // node-fetch's real FetchError format embeds the full request URL.
+    mockFetch.mockRejectedValueOnce(
+      new Error(
+        'request to https://api.census.gov/data/2023/acs/acs5?get=NAME&key=SECRET123&for=state:02 failed, reason: ECONNRESET',
+      ),
+    )
+    const err = await fetchWithTimeout(
+      'https://api.census.gov/data/2023/acs/acs5?get=NAME&key=SECRET123&for=state:02',
+    ).catch((e: Error) => e)
+    expect(err.message).not.toContain('SECRET123')
+    expect(err.stack).not.toContain('SECRET123')
+    expect(err.message).toContain('key=REDACTED&for=state:02')
+    expect(err.message).toContain('ECONNRESET')
+  })
+
   it('rethrows non-abort errors unchanged', async () => {
     mockFetch.mockRejectedValueOnce(new Error('Network error'))
     await expect(

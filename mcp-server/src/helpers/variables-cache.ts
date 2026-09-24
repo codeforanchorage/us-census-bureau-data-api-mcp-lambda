@@ -61,7 +61,11 @@ export async function fetchVariablesIndex(
 
   const promise = loadIndex(dataset, year, apiKey).catch((err) => {
     console.warn(`variables.json fetch failed for ${key}: ${String(err)}`)
-    // Cache the null so we don't retry repeatedly within a session.
+    // Transient failure (timeout, network, 5xx): evict so the next call
+    // retries. Caching it would silently disable cell-code validation, MOE
+    // pairing, and labels for this dataset/year for the life of the warm
+    // container. A definitive miss (4xx) resolves to null and stays cached.
+    cache.delete(key)
     return null
   })
   cache.set(key, promise)
@@ -76,6 +80,9 @@ async function loadIndex(
   const base = `https://api.census.gov/data/${year}/${dataset}/variables.json`
   const url = apiKey ? `${base}?key=${apiKey}` : base
   const res = await fetchWithTimeout(url)
+  if (res.status >= 500) {
+    throw new Error(`variables.json returned HTTP ${res.status}`)
+  }
   if (!res.ok) return null
   const data = (await res.json()) as RawVariablesResponse
   if (!data || typeof data !== 'object' || !data.variables) return null

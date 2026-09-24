@@ -5,4 +5,4 @@
 // to hardcode their own copy of '0.1.0', which made the wire version
 // meaningless.
 export const SERVER_NAME = 'census-api'
-export const SERVER_VERSION = '0.3.0'
+export const SERVER_VERSION = '0.3.1'
