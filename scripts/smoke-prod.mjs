@@ -374,6 +374,23 @@ async function structuredChecks() {
     String(textOf(oneDataset).length),
   )
 
+  console.log('\n== invalid arguments ==')
+  const badArgs = await post(
+    rpc(40, 'tools/call', {
+      name: 'fetch-aggregate-data',
+      arguments: { dataset: 'acs/acs5', year: '2023', get: {} },
+    }),
+  )
+  check(
+    'bad arguments return a tool result, not a JSON-RPC error',
+    badArgs.json?.error === undefined && badArgs.json?.result?.isError === true,
+    JSON.stringify(badArgs.json?.error ?? {}),
+  )
+  check(
+    'the error names the offending field in plain text',
+    textOf(badArgs.json?.result).includes('- year: Expected number'),
+  )
+
   console.log('\n== key redaction sweep ==')
   const everything = JSON.stringify([
     hit,

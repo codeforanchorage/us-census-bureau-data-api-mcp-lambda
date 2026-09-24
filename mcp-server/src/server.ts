@@ -86,20 +86,28 @@ export class MCPServer {
       throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${toolName}`)
     }
 
-    try {
-      // Validate arguments using the tool's schema
-      const validatedArgs = tool.argsSchema.parse(request.params.arguments)
-      // Call the tool handler
-      return await tool.handler(validatedArgs)
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        throw new McpError(
-          ErrorCode.InvalidParams,
-          `Invalid arguments: ${err.message}`,
-        )
+    // Bad arguments come back as a tool execution error (isError), not a
+    // JSON-RPC -32602: the spec routes input validation failures through
+    // the result so the model sees them and can correct its next call,
+    // whereas many clients surface protocol errors to the user and never
+    // show them to the model. Unknown tools above stay protocol errors.
+    const parsed = tool.argsSchema.safeParse(request.params.arguments)
+    if (!parsed.success) {
+      console.warn(`Invalid arguments for ${toolName}: ${parsed.error.message}`)
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              `Invalid arguments for ${toolName}:\n` +
+              `${formatZodIssues(parsed.error)}\n\n` +
+              `Correct these arguments and call ${toolName} again; its inputSchema lists the expected fields.`,
+          },
+        ],
+        isError: true,
       }
-      throw err
     }
+    return await tool.handler(parsed.data)
   }
 
   registerTool<T extends object>(tool: MCPTool<T>) {
@@ -143,7 +151,7 @@ export class MCPServer {
       if (err instanceof z.ZodError) {
         throw new McpError(
           ErrorCode.InvalidParams,
-          `Invalid arguments: ${err.message}`,
+          `Invalid arguments:\n${formatZodIssues(err)}`,
         )
       }
       throw err
@@ -157,4 +165,16 @@ export class MCPServer {
   async connect(transport: StdioServerTransport) {
     await this.server.connect(transport)
   }
+}
+
+// One "- field: problem" line per issue, instead of ZodError.message's
+// pretty-printed JSON dump. Nested paths are dotted (get.variables);
+// an issue on the arguments object itself is labelled as such.
+export function formatZodIssues(err: z.ZodError): string {
+  return err.issues
+    .map(
+      (issue) =>
+        `- ${issue.path.length > 0 ? issue.path.join('.') : '(arguments)'}: ${issue.message}`,
+    )
+    .join('\n')
 }
