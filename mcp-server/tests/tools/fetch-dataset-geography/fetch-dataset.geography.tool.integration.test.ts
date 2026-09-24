@@ -8,10 +8,85 @@ import {
   afterEach,
   vi,
 } from 'vitest'
+import Ajv from 'ajv'
 import { Client } from 'pg'
 import { FetchDatasetGeographyTool } from '../../../src/tools/fetch-dataset-geography.tool.js'
 import { DatabaseService } from '../../../src/services/database.service.js'
+import { FetchDatasetGeographyOutputSchema } from '../../../src/schema/dataset-geography.schema.js'
+import { ToolResponse } from '../../../src/types/base.types.js'
 import { databaseConfig } from '../../helpers/database-config.js'
+import { hasCensusApiKey, NEEDS_KEY } from '../../helpers/census-key.js'
+
+// The tool fetches through node-fetch (via fetchWithTimeout), so mocking
+// global.fetch has no effect. Route node-fetch through a switchable
+// override instead: tests that set it get a canned Census response, and
+// everything else still reaches the real api.census.gov.
+const fetchOverride = vi.hoisted(() => ({
+  impl: null as null | ((url: string) => Promise<unknown>),
+}))
+vi.mock('node-fetch', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node-fetch')>()
+  return {
+    ...actual,
+    default: (...args: Parameters<typeof actual.default>) =>
+      fetchOverride.impl
+        ? fetchOverride.impl(String(args[0]))
+        : actual.default(...args),
+  }
+})
+
+type GeographyFips = {
+  name: string
+  geoLevelDisplay: string
+  referenceDate: string
+  requires?: string[]
+}
+
+function mockCensusGeography(fips: GeographyFips[]): void {
+  fetchOverride.impl = async () => ({
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    json: async () => ({ fips }),
+  })
+}
+
+type Level = {
+  code: string
+  displayName: string
+  querySyntax: string
+  description?: string
+  onSpine: boolean
+  queryExample: string
+}
+type Structured = {
+  total_count: number
+  levels: Level[]
+  caveats: { code: string; message: string }[]
+}
+
+const validate = new Ajv({ allowUnionTypes: true }).compile(
+  FetchDatasetGeographyOutputSchema,
+)
+
+// Assert on structuredContent -- the binding, schema-validated contract --
+// rather than slicing JSON out of the rendered prose.
+function structured(response: ToolResponse): Structured {
+  expect(response.isError, textOf(response)).toBeUndefined()
+  expect(
+    validate(response.structuredContent),
+    JSON.stringify(validate.errors),
+  ).toBe(true)
+  return response.structuredContent as Structured
+}
+
+function textOf(response: ToolResponse): string {
+  return (response.content[0] as { text: string }).text
+}
+
+function level(s: Structured, code: string): Level | undefined {
+  return s.levels.find((l) => l.code === code)
+}
 
 describe('FetchDatasetGeographyTool - Integration Tests', () => {
   let testClient: Client
@@ -34,23 +109,12 @@ describe('FetchDatasetGeographyTool - Integration Tests', () => {
   })
 
   afterEach(async () => {
+    fetchOverride.impl = null
     // Clean up test data after each test
-    try {
-      console.log('Starting cleanup...')
-
-      // Clean up in correct dependency order (children first)
-      await testClient.query('DELETE FROM summary_levels WHERE true')
-
-      // Reset sequences
-      await testClient.query(
-        'ALTER SEQUENCE IF EXISTS summary_levels_id_seq RESTART WITH 1',
-      )
-
-      console.log('Cleanup completed successfully')
-    } catch (error) {
-      console.error('Cleanup failed:', error)
-      throw error
-    }
+    await testClient.query('DELETE FROM summary_levels WHERE true')
+    await testClient.query(
+      'ALTER SEQUENCE IF EXISTS summary_levels_id_seq RESTART WITH 1',
+    )
   })
 
   beforeEach(async () => {
@@ -59,7 +123,7 @@ describe('FetchDatasetGeographyTool - Integration Tests', () => {
     // Insert known test data
     await testClient.query(`
       INSERT INTO summary_levels (name, description, get_variable, query_name, on_spine, code, parent_summary_level)
-      VALUES 
+      VALUES
         ('United States', 'United States total', 'NATION', 'us', true, '010', null),
         ('State', 'States and State equivalents', 'STATE', 'state', true, '040', '010'),
         ('County', 'Counties and county equivalents', 'COUNTY', 'county', true, '050', '040'),
@@ -69,9 +133,9 @@ describe('FetchDatasetGeographyTool - Integration Tests', () => {
 
     // Set up parent relationships
     await testClient.query(`
-      UPDATE summary_levels 
+      UPDATE summary_levels
       SET parent_summary_level_id = (
-        SELECT id FROM summary_levels parent 
+        SELECT id FROM summary_levels parent
         WHERE parent.code = summary_levels.parent_summary_level
       )
       WHERE parent_summary_level IS NOT NULL;
@@ -80,37 +144,15 @@ describe('FetchDatasetGeographyTool - Integration Tests', () => {
 
   describe('Real Database Integration', () => {
     it('should successfully connect to database and retrieve geography levels', async () => {
-      try {
-        const isHealthy = await databaseService.healthCheck()
-        console.log('Health check result:', isHealthy)
-
-        if (!isHealthy) {
-          // Try to get more details about the connection
-          console.log(
-            'Health check failed, attempting direct connection test...',
-          )
-
-          try {
-            const testResult = await databaseService.query('SELECT 1 as test')
-            console.log('Direct query test result:', testResult)
-          } catch (error) {
-            console.error('Direct query failed:', error)
-          }
-        }
-
-        expect(isHealthy).toBe(true)
-      } catch (error) {
-        console.error('Health check threw an error:', error)
-        throw error
-      }
+      expect(await databaseService.healthCheck()).toBe(true)
 
       const result = await databaseService.query(`
         SELECT name, query_name, code, on_spine, parent_summary_level
-        FROM summary_levels 
+        FROM summary_levels
         ORDER BY code
       `)
 
-      expect(result.rows).toHaveLength(5) //Geo Levels are Seeded by DB Container
+      expect(result.rows).toHaveLength(5)
       expect(result.rows[0]).toMatchObject({
         name: 'United States',
         query_name: 'us',
@@ -120,177 +162,129 @@ describe('FetchDatasetGeographyTool - Integration Tests', () => {
       })
     })
 
-    it('should handle database connection failures gracefully', async () => {
-      // Temporarily break the database connection
+    it('should return a clean, sanitized error when the database is unreachable', async () => {
+      // Swap the singleton for one pointed at a dead database.
       await databaseService.cleanup()
-
-      // Override with invalid connection
       process.env.DATABASE_URL =
         'postgresql://invalid:invalid@localhost:9999/invalid'
       ;(
         DatabaseService as typeof DatabaseService & { instance: unknown }
       ).instance = undefined
+      const brokenService = DatabaseService.getInstance()
 
-      const brokenTool = new FetchDatasetGeographyTool()
+      try {
+        const response = await new FetchDatasetGeographyTool().toolHandler(
+          { dataset: 'acs/acs1' },
+          process.env.CENSUS_API_KEY,
+        )
 
-      const response = await brokenTool.toolHandler(
-        { dataset: 'acs/acs1' },
-        process.env.CENSUS_API_KEY,
-      )
-
-      expect(response.content[0].text).toContain('Database connection failed')
-
-      // Restore connection for other tests
-      process.env.DATABASE_URL = `postgresql://${databaseConfig.user}:${databaseConfig.password}@${databaseConfig.host}:${databaseConfig.port}/${databaseConfig.database}`
-      ;(
-        DatabaseService as typeof DatabaseService & { instance: unknown }
-      ).instance = undefined
-      databaseService = DatabaseService.getInstance()
+        expect(response.isError).toBe(true)
+        // The driver error (host, port, credentials) never reaches the
+        // caller -- DatabaseService sanitizes it to an actionable sentence.
+        expect(textOf(response)).toBe(
+          'Failed to fetch dataset geography levels: The database is temporarily unavailable. Retry after a short delay.',
+        )
+        expect(textOf(response)).not.toContain('9999')
+      } finally {
+        // Restore even when an assertion fails: a leaked broken singleton
+        // cascades "database unavailable" into every later test and makes
+        // afterAll end an already-ended pool.
+        await brokenService.cleanup()
+        process.env.DATABASE_URL = `postgresql://${databaseConfig.user}:${databaseConfig.password}@${databaseConfig.host}:${databaseConfig.port}/${databaseConfig.database}`
+        ;(
+          DatabaseService as typeof DatabaseService & { instance: unknown }
+        ).instance = undefined
+        databaseService = DatabaseService.getInstance()
+      }
     })
 
-    it('should handle missing geography levels gracefully', async () => {
-      // Mock fetch to return empty FIPS array
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ fips: [] }),
-      })
-
-      global.fetch = mockFetch
+    it('reports a dataset with no geography levels as a known zero, not an error', async () => {
+      mockCensusGeography([])
 
       const response = await tool.toolHandler(
         { dataset: 'acs/acs1' },
         process.env.CENSUS_API_KEY,
       )
+      const s = structured(response)
 
-      expect(response.content[0].type).toBe('text')
-      const responseText = response.content[0].text
-
-      expect(responseText).toContain('Census geography endpoint returned 404')
-      expect(responseText).toContain('list-datasets')
+      expect(s.total_count).toBe(0)
+      expect(s.levels).toEqual([])
+      expect(s.caveats.map((c) => c.code)).toEqual(['NO_GEOGRAPHY_LEVELS'])
+      expect(textOf(response)).toContain(s.caveats[0].message)
     })
   })
 
-  describe('Real Census API Integration', () => {
-    it('should fetch real ACS geography metadata with database enhancement', async () => {
-      const datasetName = 'acs/acs1'
+  describe.skipIf(!hasCensusApiKey)(
+    `Real Census API Integration ${NEEDS_KEY}`,
+    () => {
+      it('should fetch real ACS geography metadata with database enhancement', async () => {
+        const response = await tool.toolHandler(
+          { dataset: 'acs/acs1', year: 2022 },
+          process.env.CENSUS_API_KEY,
+        )
 
-      const response = await tool.toolHandler(
-        {
-          dataset: datasetName,
-          year: 2022,
-        },
-        process.env.CENSUS_API_KEY,
-      )
+        expect(textOf(response)).toContain(
+          'Available geographies for acs/acs1 (2022)',
+        )
+        const s = structured(response)
+        expect(s.total_count).toBeGreaterThan(0)
 
-      expect(response.content[0].type).toBe('text')
-      const responseText = response.content[0].text
-
-      // Basic structure checks
-      expect(responseText).toContain(
-        'Available geographies for acs/acs1 (2022)',
-      )
-
-      // Parse JSON response
-      const jsonStart = responseText.indexOf('[')
-      const parsedData = JSON.parse(responseText.substring(jsonStart))
-
-      expect(Array.isArray(parsedData)).toBe(true)
-      expect(parsedData.length).toBeGreaterThan(0)
-
-      // Find a geography that should match our database
-      const usGeography = parsedData.find((geo) => geo.code === '010')
-
-      if (usGeography) {
-        // Verify database values are used
-        expect(usGeography).toMatchObject({
+        // Levels seeded into summary_levels are enhanced from the database.
+        expect(level(s, '010')).toMatchObject({
           displayName: 'United States',
           querySyntax: 'us',
           onSpine: true,
           description: 'United States total',
         })
-      }
-
-      const stateGeography = parsedData.find((geo) => geo.code === '040')
-      if (stateGeography) {
-        expect(stateGeography).toMatchObject({
+        expect(level(s, '040')).toMatchObject({
           displayName: 'State',
           querySyntax: 'state',
           onSpine: true,
           queryExample: expect.stringContaining('for=state:*'),
         })
-      }
-    }, 15000) // Extended timeout for real API calls
+      }, 15000) // Extended timeout for real API calls
 
-    it('should work with timeseries datasets', async () => {
-      const datasetName = 'timeseries/healthins/sahie'
+      it('should work with timeseries datasets', async () => {
+        const response = await tool.toolHandler(
+          { dataset: 'timeseries/healthins/sahie' },
+          process.env.CENSUS_API_KEY,
+        )
 
-      const response = await tool.toolHandler(
-        {
-          dataset: datasetName,
-        },
-        process.env.CENSUS_API_KEY,
-      )
-
-      expect(response.content[0].type).toBe('text')
-      const responseText = response.content[0].text
-
-      expect(responseText).toContain(
-        'Available geographies for timeseries/healthins/sahie',
-      )
-
-      // Should be able to parse as JSON
-      const jsonStart = responseText.indexOf('[')
-      const parsedData = JSON.parse(responseText.substring(jsonStart))
-      expect(Array.isArray(parsedData)).toBe(true)
-    }, 15000)
-  })
+        expect(textOf(response)).toContain(
+          'Available geographies for timeseries/healthins/sahie',
+        )
+        const s = structured(response)
+        expect(Array.isArray(s.levels)).toBe(true)
+      }, 15000)
+    },
+  )
 
   describe('Database-Driven Metadata Enhancement', () => {
     it('should use database values over API values when available', async () => {
-      // Mock fetch to return simple API data
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          fips: [
-            {
-              name: 'us', // API name
-              geoLevelDisplay: '010',
-              referenceDate: '2022-01-01',
-            },
-            {
-              name: 'state', // API name
-              geoLevelDisplay: '040',
-              referenceDate: '2022-01-01',
-              requires: ['us'],
-            },
-          ],
-        }),
-      })
+      mockCensusGeography([
+        { name: 'us', geoLevelDisplay: '010', referenceDate: '2022-01-01' },
+        {
+          name: 'state',
+          geoLevelDisplay: '040',
+          referenceDate: '2022-01-01',
+          requires: ['us'],
+        },
+      ])
 
-      global.fetch = mockFetch
-
-      const response = await tool.toolHandler(
-        { dataset: 'acs/acs1', year: '2022' },
-        process.env.CENSUS_API_KEY,
+      const s = structured(
+        await tool.toolHandler(
+          { dataset: 'acs/acs1', year: 2022 },
+          process.env.CENSUS_API_KEY,
+        ),
       )
 
-      const responseText = response.content[0].text
-      const jsonStart = responseText.indexOf('[')
-      const parsedData = JSON.parse(responseText.substring(jsonStart))
-
-      // Verify database values override API values
-      const usRecord = parsedData.find((geo) => geo.code === '010')
-
-      expect(usRecord).toMatchObject({
+      expect(level(s, '010')).toMatchObject({
         displayName: 'United States', // From database, not API 'us'
         querySyntax: 'us', // From database query_name
         description: 'United States total', // From database
         onSpine: true, // From database
       })
-
-      const stateRecord = parsedData.find((geo) => geo.code === '040')
-
-      expect(stateRecord).toMatchObject({
+      expect(level(s, '040')).toMatchObject({
         displayName: 'State', // From database, not API 'state'
         querySyntax: 'state', // From database query_name
         queryExample: 'for=state:*', // Built from database hierarchy
@@ -299,93 +293,63 @@ describe('FetchDatasetGeographyTool - Integration Tests', () => {
     })
 
     it('should build correct hierarchical query examples', async () => {
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          fips: [
-            { name: 'us', geoLevelDisplay: '010', referenceDate: '2022-01-01' },
-            {
-              name: 'state',
-              geoLevelDisplay: '040',
-              referenceDate: '2022-01-01',
-              requires: ['us'],
-            },
-            {
-              name: 'county',
-              geoLevelDisplay: '050',
-              referenceDate: '2022-01-01',
-              requires: ['state'],
-            },
-            {
-              name: 'congressional district',
-              geoLevelDisplay: '500',
-              referenceDate: '2022-01-01',
-              requires: ['state'],
-            },
-          ],
-        }),
-      })
+      mockCensusGeography([
+        { name: 'us', geoLevelDisplay: '010', referenceDate: '2022-01-01' },
+        {
+          name: 'state',
+          geoLevelDisplay: '040',
+          referenceDate: '2022-01-01',
+          requires: ['us'],
+        },
+        {
+          name: 'county',
+          geoLevelDisplay: '050',
+          referenceDate: '2022-01-01',
+          requires: ['state'],
+        },
+        {
+          name: 'congressional district',
+          geoLevelDisplay: '500',
+          referenceDate: '2022-01-01',
+          requires: ['state'],
+        },
+      ])
 
-      global.fetch = mockFetch
-
-      const response = await tool.toolHandler(
-        { dataset: 'acs/acs1', year: '2022' },
-        process.env.CENSUS_API_KEY,
+      const s = structured(
+        await tool.toolHandler(
+          { dataset: 'acs/acs1', year: 2022 },
+          process.env.CENSUS_API_KEY,
+        ),
       )
 
-      const responseText = response.content[0].text
-      const jsonStart = responseText.indexOf('[')
-      const parsedData = JSON.parse(responseText.substring(jsonStart))
-
-      // Check query examples are built from database hierarchy
-      const usRecord = parsedData.find((geo) => geo.code === '010')
-      expect(usRecord?.queryExample).toBe('for=us:*')
-
-      const stateRecord = parsedData.find((geo) => geo.code === '040')
-      expect(stateRecord?.queryExample).toBe('for=state:*')
-
-      const countyRecord = parsedData.find((geo) => geo.code === '050')
-      expect(countyRecord?.queryExample).toBe('for=county:*&in=state:*')
-
-      const congressionalRecord = parsedData.find((geo) => geo.code === '500')
-      expect(congressionalRecord?.queryExample).toBe(
+      expect(level(s, '010')?.queryExample).toBe('for=us:*')
+      expect(level(s, '040')?.queryExample).toBe('for=state:*')
+      expect(level(s, '050')?.queryExample).toBe('for=county:*&in=state:*')
+      expect(level(s, '500')?.queryExample).toBe(
         'for=congressional+district:*&in=state:*',
       )
     })
 
     it('should handle mixed on_spine values from database', async () => {
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          fips: [
-            { name: 'us', geoLevelDisplay: '010', referenceDate: '2022-01-01' },
-            {
-              name: 'urban area',
-              geoLevelDisplay: '400',
-              referenceDate: '2022-01-01',
-            },
-          ],
-        }),
-      })
+      mockCensusGeography([
+        { name: 'us', geoLevelDisplay: '010', referenceDate: '2022-01-01' },
+        {
+          name: 'urban area',
+          geoLevelDisplay: '400',
+          referenceDate: '2022-01-01',
+        },
+      ])
 
-      global.fetch = mockFetch
-
-      const response = await tool.toolHandler(
-        { dataset: 'acs/acs1', year: '2022' },
-        process.env.CENSUS_API_KEY,
+      const s = structured(
+        await tool.toolHandler(
+          { dataset: 'acs/acs1', year: 2022 },
+          process.env.CENSUS_API_KEY,
+        ),
       )
 
-      const responseText = response.content[0].text
-      const jsonStart = responseText.indexOf('[')
-      const parsedData = JSON.parse(responseText.substring(jsonStart))
-
-      // US should be on spine
-      const usRecord = parsedData.find((geo) => geo.code === '010')
-      expect(usRecord?.onSpine).toBe(true)
-
-      // Urban Area should not be on spine (based on our test data)
-      const urbanRecord = parsedData.find((geo) => geo.code === '400')
-      expect(urbanRecord?.onSpine).toBe(false) // Fixed: was usRecord instead of urbanRecord
+      expect(level(s, '010')?.onSpine).toBe(true)
+      // Urban Area is seeded with on_spine = false
+      expect(level(s, '400')?.onSpine).toBe(false)
     })
   })
 })
