@@ -117,7 +117,7 @@ describe('MCP Server', () => {
         expect(result.content).toBeDefined()
       })
 
-      it('should throw InvalidParams for invalid arguments (ZodError)', async () => {
+      it('returns invalid arguments as an isError result the model can read', async () => {
         const request = {
           params: {
             name: 'fetch-summary-table-mock',
@@ -128,14 +128,36 @@ describe('MCP Server', () => {
           },
         }
 
-        try {
-          await mcpServer.handleToolCall(request)
-          expect.fail('Expected an error to be thrown')
-        } catch (error) {
-          expect(error).toBeInstanceOf(McpError)
-          expect(error.code).toBe(ErrorCode.InvalidParams)
-          expect(error.message).toContain('Invalid arguments:')
-        }
+        const result = await mcpServer.handleToolCall(request)
+
+        expect(result.isError).toBe(true)
+        expect(result).not.toHaveProperty('structuredContent')
+        expect(result.content).toEqual([
+          {
+            type: 'text',
+            text:
+              'Invalid arguments for fetch-summary-table-mock:\n' +
+              '- message: Required\n\n' +
+              'Correct these arguments and call fetch-summary-table-mock again; its inputSchema lists the expected fields.',
+          },
+        ])
+      })
+
+      it('labels an issue on the arguments object itself', async () => {
+        const result = await mcpServer.handleToolCall({
+          params: { name: 'fetch-summary-table-mock' },
+        })
+
+        expect(result.isError).toBe(true)
+        expect(result.content[0].text).toContain('- (arguments): Required')
+      })
+
+      it('never runs the tool handler when arguments are invalid', async () => {
+        const handlerSpy = vi.spyOn(mockFetchSummaryTableTool, 'handler')
+        await mcpServer.handleToolCall({
+          params: { name: 'fetch-summary-table-mock', arguments: {} },
+        })
+        expect(handlerSpy).not.toHaveBeenCalled()
       })
 
       it('should re-throw non-ZodError errors', async () => {
