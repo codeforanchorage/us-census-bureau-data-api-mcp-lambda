@@ -127,6 +127,14 @@ describe('labelForCell + prettyLabel', () => {
       'Total / Occupied housing units',
     )
   })
+
+  it('drops the bare leading separator on decennial labels', () => {
+    // Verbatim dec/dhc 2020 P1_001N label.
+    expect(prettyLabel(' !!Total')).toBe('Total')
+    expect(prettyLabel(' !!Total:!!Population of one race:')).toBe(
+      'Total: / Population of one race:',
+    )
+  })
 })
 
 describe('attribute-only variables (live-catalog shape)', () => {

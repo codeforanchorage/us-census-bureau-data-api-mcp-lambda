@@ -28,7 +28,7 @@ import {
   validateGeographyArgs,
 } from '../schema/validators.js'
 
-export const toolDescription = `Fetches Census statistics for a dataset, vintage, and geography. Never guess cell codes -- run search-data-tables first. ACS estimates are auto-paired with their margin of error and flagged LOW RELIABILITY above CV 30%; suppression sentinels are decoded to text. MOE pairing doubles the variable count against the Census 50-variable cap, so pass at most 25 variables per call for ACS datasets (group requests are exempt). ACS 1-year (acs/acs1) only covers areas of 65,000+ people; use acs/acs5 for smaller geographies. Responses show at most 100 records -- truncation is display-side, the full result is still fetched upstream -- so narrow wildcard geographies; unbounded national wildcards for high-cardinality levels (e.g. for=county:* with no in=) are rejected. Required: dataset, year, get (variables or group), and one of for/ucgid.`
+export const toolDescription = `Fetches Census statistics for a dataset, vintage, and geography. Never guess cell codes -- find the table with search-data-tables and its codes with list-table-variables, or fetch the whole table with get.group. ACS estimates are auto-paired with their margin of error and flagged LOW RELIABILITY above CV 30%; suppression sentinels are decoded to text. MOE pairing doubles the variable count against the Census 50-variable cap, so pass at most 25 variables per call for ACS datasets (group requests are exempt). ACS 1-year (acs/acs1) only covers areas of 65,000+ people; use acs/acs5 for smaller geographies. Responses show at most 100 records -- truncation is display-side, the full result is still fetched upstream -- so narrow wildcard geographies; unbounded national wildcards for high-cardinality levels (e.g. for=county:* with no in=) are rejected. Required: dataset, year, get (variables or group), and one of for/ucgid.`
 
 // Census Data API hard limit on explicit get= variables per request.
 const CENSUS_VARIABLE_LIMIT = 50
@@ -115,7 +115,7 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
           .join('\n')
         return this.createErrorResponse(
           `Unknown cell code(s) for ${args.dataset} ${args.year}:\n${hints}\n\n` +
-            `Use search-data-tables to discover the correct codes before calling fetch-aggregate-data.`,
+            `Use list-table-variables (or search-data-tables to find the table first) to get the correct codes before calling fetch-aggregate-data.`,
         )
       }
     }

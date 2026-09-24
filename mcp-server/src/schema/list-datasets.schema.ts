@@ -11,9 +11,23 @@ export const AggregatedResultSchema = z.object({
 export const ListDatasetsOutputSchema = {
   type: 'object',
   properties: {
+    query: {
+      type: 'object',
+      properties: {
+        query: { type: ['string', 'null'] },
+        dataset: { type: ['string', 'null'] },
+      },
+      required: ['query', 'dataset'],
+    },
+    catalog_count: {
+      type: 'integer',
+      description:
+        'Number of aggregate datasets in the whole catalog, before any filter.',
+    },
     total_count: {
       type: 'integer',
-      description: 'Number of aggregate datasets in the catalog.',
+      description:
+        'Number of datasets returned (after the query/dataset filters). 0 means the filter matched nothing, not that the Census lacks the data.',
     },
     datasets: {
       type: 'array',
@@ -48,7 +62,35 @@ export const ListDatasetsOutputSchema = {
       },
     },
   },
-  required: ['total_count', 'datasets', 'caveats'],
+  required: ['query', 'catalog_count', 'total_count', 'datasets', 'caveats'],
+}
+
+const QUERY_HINT =
+  "Optional case-insensitive filter: every word must appear in the dataset ID or title, e.g. 'acs5 profile' or 'county business patterns'."
+const DATASET_HINT =
+  "Optional exact dataset ID, e.g. 'acs/acs5', to get just that dataset's title and published vintages."
+
+export const ListDatasetsInputSchema = z.object({
+  query: z.string().trim().min(1).optional().describe(QUERY_HINT),
+  dataset: z.string().trim().min(1).optional().describe(DATASET_HINT),
+})
+export type ListDatasetsArgs = z.infer<typeof ListDatasetsInputSchema>
+
+export const ListDatasetsArgsSchema = {
+  type: 'object',
+  properties: {
+    query: {
+      type: 'string',
+      description: QUERY_HINT,
+      examples: ['acs5 profile', 'decennial'],
+    },
+    dataset: {
+      type: 'string',
+      description: DATASET_HINT,
+      examples: ['acs/acs5', 'dec/dhc'],
+    },
+  },
+  required: [],
 }
 
 // Zod schema for the simplified dataset

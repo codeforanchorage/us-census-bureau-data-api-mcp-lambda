@@ -149,10 +149,15 @@ export function labelForCell(
 }
 
 export function prettyLabel(label: string): string {
-  return label
-    .replace(/^Estimate!!/, '')
-    .replace(/!!/g, ' / ')
-    .trim()
+  return (
+    label
+      .replace(/^Estimate!!/, '')
+      // Decennial labels open with a bare separator (" !!Total"), which
+      // would otherwise render as a stray leading " / ".
+      .replace(/^\s*!!/, '')
+      .replace(/!!/g, ' / ')
+      .trim()
+  )
 }
 
 // Returns suggestions for a likely-typo cell code. Uses a simple

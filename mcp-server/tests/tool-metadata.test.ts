@@ -20,6 +20,7 @@ const EXPECTED_TITLES: Record<string, string> = {
   'list-datasets': 'List Datasets',
   'list-survey-components': 'List Survey Components',
   'list-survey-programs': 'List Survey Programs',
+  'list-table-variables': 'List Table Variables',
   'resolve-geography-fips': 'Resolve Geography FIPS',
   'search-data-tables': 'Search Data Tables',
 }

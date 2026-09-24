@@ -55,15 +55,15 @@ describe('ListDatasetsTool', () => {
       expect(tool.requiresApiKey).toBe(true)
     })
 
-    it('should have empty input schema', () => {
-      expect(tool.inputSchema).toEqual({
-        type: 'object',
-        properties: {},
-        required: [],
-      })
+    it('should take only optional filter arguments', () => {
+      expect(tool.inputSchema.required).toEqual([])
+      expect(Object.keys(tool.inputSchema.properties ?? {}).sort()).toEqual([
+        'dataset',
+        'query',
+      ])
     })
 
-    it('should have empty args schema', () => {
+    it('should accept no arguments (whole catalog)', () => {
       const schema = tool.argsSchema
       expect(schema.safeParse({})).toEqual({ success: true, data: {} })
     })
