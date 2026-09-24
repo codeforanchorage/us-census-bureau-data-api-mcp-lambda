@@ -34,6 +34,6 @@ terraform apply \
 echo ""
 echo -e "${GREEN}Backend ready. Main stack will use:${NC}"
 echo "  bucket = $BUCKET"
-echo "  table  = terraform-state-lock"
+echo "  lock   = S3 lockfile (use_lockfile = true in terraform/aws/backend.tf)"
 echo ""
 echo "Next: cd terraform/aws && terraform init"
