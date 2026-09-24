@@ -42,14 +42,16 @@ Manager + Lambda free tier).
 ### Prerequisites
 
 - AWS CLI configured for account `420839047325` / region `us-west-2`
-- Terraform ≥ 1.0
+- Terraform ≥ 1.10 (S3-native state locking)
 - Node 18+, npm
 - A Census Data API key — https://api.census.gov/data/key_signup.html
 
 ### One-time setup
 
 ```bash
-# 1. Bootstrap Terraform remote state (S3 + DynamoDB)
+# 1. Bootstrap Terraform remote state (S3 bucket; state is locked with an
+#    S3 lockfile. Bootstrap also creates a DynamoDB lock table that other
+#    fleet stacks still use -- this stack no longer does.)
 ./scripts/setup-backend.sh
 
 # 2. Export your Census API key (the deploy script injects it into Lambda env)
