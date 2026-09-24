@@ -79,7 +79,10 @@ describe('SeedRunner', () => {
       end: vi.fn().mockResolvedValue(undefined),
       query: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
     }
-    ;(Client as unknown as Mock).mockImplementation(() => mockClient)
+    // `function`, not an arrow: Vitest 4 mocks must be constructible.
+    ;(Client as unknown as Mock).mockImplementation(function () {
+      return mockClient
+    })
 
     // Setup mock fetch
     mockFetch = vi.fn()
