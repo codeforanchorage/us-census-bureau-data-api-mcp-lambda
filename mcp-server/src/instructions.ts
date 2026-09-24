@@ -9,13 +9,14 @@ export const SERVER_INSTRUCTIONS = `You are connected to the U.S. Census Bureau 
 Workflow -- never guess FIPS codes, dataset IDs, or cell codes:
 1. resolve-geography-fips("Anchorage", optional summary_level) -> the for/in strings for the place.
 2. search-data-tables("median household income", api_endpoint="acs/acs5") -> the table_id.
-3. fetch-aggregate-data(dataset, year, get, for/in). Prefer get.group=<table_id> to fetch a whole table when you do not know its exact cell codes. An unknown cell code is rejected with "did you mean" suggestions.
-Unsure which survey fits? Use list-survey-programs -> list-survey-components first. Use fetch-dataset-geography to check which geography levels a dataset publishes, and list-datasets to check which vintages exist.
+3. list-table-variables(dataset, year, table_id) -> the table's cell codes and labels (label_filter narrows a large table).
+4. fetch-aggregate-data(dataset, year, get, for/in) with get.variables=[codes], or get.group=<table_id> for the whole table. An unknown cell code is rejected with "did you mean" suggestions.
+Unsure which survey fits? Use list-survey-programs -> list-survey-components first. Use fetch-dataset-geography to check which geography levels a dataset publishes, and list-datasets(dataset=...) to check which vintages exist.
 
 Choosing a dataset:
 - acs/acs5 (5-year ACS) covers every geography down to tract and block group. Use it for anything smaller than a large city or county.
 - acs/acs1 (1-year ACS) is more current but only covers areas of 65,000+ people. A 400 error on a small place usually means use acs5.
-- Use the latest published vintage unless the user asks for a specific year; list-datasets shows which vintages exist.
+- Use the latest published vintage unless the user asks for a specific year; list-datasets(dataset="acs/acs5") shows which vintages exist.
 - The decennial census (dec/*) gives full counts, not estimates, but only every ten years.
 
 Reporting results:

@@ -312,6 +312,8 @@ describe('search-data-tables structured output schema', () => {
 describe('list-datasets structured output schema', () => {
   it('conforms, including a dataset with no vintage axis', () => {
     validateOrThrow(ListDatasetsOutputSchema, {
+      query: { query: null, dataset: null },
+      catalog_count: 2,
       total_count: 2,
       datasets: [
         {

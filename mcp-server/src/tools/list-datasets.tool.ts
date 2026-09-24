@@ -1,10 +1,11 @@
-import { z } from 'zod'
-
 import { Tool } from '@modelcontextprotocol/sdk/types.js'
 
 import {
   AllDatasetMetadataJsonSchema,
   AllDatasetMetadataJsonResponseType,
+  ListDatasetsArgs,
+  ListDatasetsArgsSchema,
+  ListDatasetsInputSchema,
   ListDatasetsOutputSchema,
   SimplifiedAPIDatasetType,
   AggregatedResultType,
@@ -14,9 +15,9 @@ import {
 import { BaseTool } from './base.tool.js'
 
 import { fetchWithTimeout } from '../helpers/http.js'
-import { ToolResponse } from '../types/base.types.js'
+import { ToolCaveat, ToolResponse } from '../types/base.types.js'
 
-export const toolDescription = `Returns the full Census catalog of dataset IDs, titles, and available vintages (~1,700 entries); never guess a dataset_id. For orientation prefer the guided flow list-survey-programs -> list-survey-components (30 programs narrowing to concrete api_endpoints); call this when you need the complete vintage list for a dataset, or a dataset the programs index does not cover.`
+export const toolDescription = `Returns Census catalog entries -- dataset IDs, titles, and published vintages; never guess a dataset_id. Pass dataset (exact ID, e.g. "acs/acs5") to check one dataset's vintages, or query (words matched against ID and title, e.g. "acs5 profile") to search. With no arguments it returns the whole catalog (~250 datasets, about 37 KB) -- avoid that unless you need it. For orientation prefer the guided flow list-survey-programs -> list-survey-components.`
 
 // Module-level cache — persists across warm Lambda invocations so repeated
 // calls don't refetch Census's ~2MB data.json catalog every time. Holds the
@@ -34,22 +35,19 @@ export function clearCatalogCache(): void {
   catalogCache = null
 }
 
-export class ListDatasetsTool extends BaseTool<object> {
+export class ListDatasetsTool extends BaseTool<ListDatasetsArgs> {
   name = 'list-datasets'
   title = 'List Datasets'
   description = toolDescription
   readonly requiresApiKey = true
 
-  inputSchema: Tool['inputSchema'] = {
-    type: 'object',
-    properties: {},
-    required: [],
-  }
+  inputSchema: Tool['inputSchema'] =
+    ListDatasetsArgsSchema as Tool['inputSchema']
   outputSchema: Tool['inputSchema'] =
     ListDatasetsOutputSchema as Tool['inputSchema']
 
   get argsSchema() {
-    return z.object({})
+    return ListDatasetsInputSchema
   }
 
   constructor() {
@@ -150,25 +148,52 @@ export class ListDatasetsTool extends BaseTool<object> {
     return Array.from(grouped.values())
   }
 
-  // Structured mirror of the catalog text (which is already JSON). Both
-  // channels are built from the same aggregated array.
-  private structuredCatalog(
-    aggregated: AggregatedResultType[],
-  ): Record<string, unknown> {
-    return {
-      total_count: aggregated.length,
-      datasets: aggregated,
-      caveats: [],
+  // Applies the optional filters to the cached catalog and builds both
+  // channels from the same filtered array. The text stays the JSON it has
+  // always been, led by any caveats so a NO_MATCH is never silent.
+  private respond(
+    catalog: AggregatedResultType[],
+    catalogJson: string,
+    args: ListDatasetsArgs,
+  ): ToolResponse {
+    const filtered = filterCatalog(catalog, args)
+    const caveats: ToolCaveat[] = []
+    if (filtered.length === 0 && (args.dataset || args.query)) {
+      caveats.push({
+        code: 'NO_MATCH',
+        message: args.dataset
+          ? `No aggregate dataset has the exact ID "${args.dataset}". Retry with query instead (e.g. query="${args.dataset}") to see near matches.`
+          : `No dataset ID or title contains every word of "${args.query}". Retry with fewer or broader words.`,
+      })
     }
+
+    const json =
+      filtered === catalog
+        ? catalogJson
+        : JSON.stringify(filtered, (_key, value) =>
+            value === null ? undefined : value,
+          )
+    const text =
+      caveats.length > 0
+        ? `${caveats.map((c) => `**${c.code}:** ${c.message}`).join('\n\n')}\n\n${json}`
+        : json
+
+    return this.createSuccessResponse(text, {
+      query: { query: args.query ?? null, dataset: args.dataset ?? null },
+      catalog_count: catalog.length,
+      total_count: filtered.length,
+      datasets: filtered,
+      caveats,
+    })
   }
 
-  async toolHandler(args: object, apiKey: string): Promise<ToolResponse> {
+  async toolHandler(
+    args: ListDatasetsArgs,
+    apiKey: string,
+  ): Promise<ToolResponse> {
     const now = Date.now()
     if (catalogCache && catalogCache.expiresAt > now) {
-      return this.createSuccessResponse(
-        catalogCache.json,
-        this.structuredCatalog(catalogCache.aggregated),
-      )
+      return this.respond(catalogCache.aggregated, catalogCache.json, args)
     }
 
     try {
@@ -206,10 +231,7 @@ export class ListDatasetsTool extends BaseTool<object> {
 
       catalogCache = { aggregated, json, expiresAt: now + CATALOG_TTL_MS }
 
-      return this.createSuccessResponse(
-        json,
-        this.structuredCatalog(aggregated),
-      )
+      return this.respond(aggregated, json, args)
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error occurred'
@@ -218,4 +240,22 @@ export class ListDatasetsTool extends BaseTool<object> {
       )
     }
   }
+}
+
+// dataset is an exact (case-insensitive) ID match; query requires every
+// whitespace-separated word to appear in the ID or title. Both may be
+// combined. With neither, the catalog array itself is returned so the
+// caller can reuse its cached JSON.
+export function filterCatalog(
+  catalog: AggregatedResultType[],
+  args: ListDatasetsArgs,
+): AggregatedResultType[] {
+  if (!args.dataset && !args.query) return catalog
+  const exact = args.dataset?.toLowerCase()
+  const words = args.query?.toLowerCase().split(/\s+/).filter(Boolean) ?? []
+  return catalog.filter((entry) => {
+    if (exact && entry.dataset.toLowerCase() !== exact) return false
+    const haystack = `${entry.dataset} ${entry.title}`.toLowerCase()
+    return words.every((w) => haystack.includes(w))
+  })
 }

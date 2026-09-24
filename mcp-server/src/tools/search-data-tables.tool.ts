@@ -12,7 +12,7 @@ import {
 import { DataTableSearchResultRow } from '../types/data-table.types.js'
 import { ToolCaveat, ToolResponse } from '../types/base.types.js'
 
-export const toolDescription = `Call this BEFORE fetch-aggregate-data to find the right table_id and cell codes; never guess Census cell codes. Searches 32,000+ tables by ID prefix, label, or API endpoint -- pass api_endpoint (e.g. "acs/acs1") when the dataset is known to cut cross-survey noise. Returns table_id, label, component, and the dataset/year combinations each table appears in. Coverage is concentrated in ACS; Economic Census, Geography, and PEP are sparsely indexed.`
+export const toolDescription = `Call this BEFORE fetch-aggregate-data to find the right table_id (then list-table-variables for its cell codes); never guess Census table or cell codes. Searches 32,000+ tables by ID prefix, label, or API endpoint -- pass api_endpoint (e.g. "acs/acs1") when the dataset is known to cut cross-survey noise. Returns table_id, label, component, and the dataset/year combinations each table appears in. Coverage is concentrated in ACS; Economic Census, Geography, and PEP are sparsely indexed.`
 
 export class SearchDataTablesTool extends BaseTool<SearchDataTablesArgs> {
   name = 'search-data-tables'

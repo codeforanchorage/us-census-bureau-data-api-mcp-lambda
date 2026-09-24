@@ -136,6 +136,11 @@ async function initializeChecks() {
       init.json.result.serverInfo.version !== '0.1.0',
     init.json?.result?.serverInfo?.version,
   )
+  check(
+    'returns server instructions naming the workflow tools',
+    typeof init.json?.result?.instructions === 'string' &&
+      init.json.result.instructions.includes('list-table-variables'),
+  )
 
   const legacy = await post(
     rpc(11, 'initialize', {
@@ -154,7 +159,7 @@ async function toolsListChecks() {
   console.log('\n== tools/list ==')
   const list = await post(rpc(20, 'tools/list'))
   const tools = list.json?.result?.tools ?? []
-  check('lists 7 tools', tools.length === 7, String(tools.length))
+  check('lists 8 tools', tools.length === 8, String(tools.length))
   check(
     'every tool has a top-level title',
     tools.every((t) => typeof t.title === 'string' && t.title.length > 0),
@@ -321,6 +326,54 @@ async function structuredChecks() {
       (cmSc?.caveats ?? []).some((c) => c.code === 'NO_MATCH'),
   )
 
+  console.log('\n== structuredContent: table variables ==')
+  const vars = await callTool(37, 'list-table-variables', {
+    dataset: 'acs/acs5',
+    year: 2023,
+    table_id: 'B01001',
+  })
+  const vSc = vars?.structuredContent
+  check(
+    'table variables call is not an error',
+    vars && vars.isError !== true,
+    textOf(vars).slice(0, 200),
+  )
+  check(
+    'table variables returns estimate codes with labels',
+    (vSc?.records ?? []).some(
+      (r) => r.code === 'B01001_001E' && typeof r.label === 'string',
+    ),
+  )
+  check(
+    'no margin-of-error or annotation code is listed as a variable',
+    (vSc?.records ?? []).length > 0 &&
+      vSc.records.every((r) => r.code.endsWith('E')),
+  )
+  const varsMiss = await callTool(38, 'list-table-variables', {
+    dataset: 'acs/acs5',
+    year: 2023,
+    table_id: 'B01002X',
+  })
+  check('unknown table is reported as an error', varsMiss?.isError === true)
+
+  console.log('\n== list-datasets filter ==')
+  const oneDataset = await callTool(39, 'list-datasets', {
+    dataset: 'acs/acs5',
+  })
+  const dSc = oneDataset?.structuredContent
+  check(
+    'dataset filter returns exactly acs/acs5 with vintages',
+    dSc?.total_count === 1 &&
+      dSc.datasets[0]?.dataset === 'acs/acs5' &&
+      dSc.datasets[0].years.length > 0,
+    String(dSc?.total_count),
+  )
+  check(
+    'filtered response is small (under 5 KB)',
+    textOf(oneDataset).length < 5000,
+    String(textOf(oneDataset).length),
+  )
+
   console.log('\n== key redaction sweep ==')
   const everything = JSON.stringify([
     hit,
@@ -329,6 +382,9 @@ async function structuredChecks() {
     agg,
     programs,
     components,
+    vars,
+    varsMiss,
+    oneDataset,
   ])
   check(
     'no response contains an unredacted key= parameter',

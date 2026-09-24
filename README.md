@@ -219,7 +219,8 @@ The MCP server exposes several methods: `tools/list`, `tools/call`, `prompts/lis
 ## Available Tools
 This section covers tools that can be called. The guided discovery flow is
 `list-survey-programs` → `list-survey-components` → `search-data-tables` →
-`fetch-dataset-geography` → `resolve-geography-fips` → `fetch-aggregate-data`.
+`list-table-variables` → `fetch-dataset-geography` → `resolve-geography-fips` →
+`fetch-aggregate-data`.
 Every tool declares an `outputSchema` and returns `structuredContent`
 alongside its text, including machine-readable caveats with stable codes.
 
@@ -240,15 +241,24 @@ argument:
 * Program String (Required) - The program acronym from `list-survey-programs`, e.g. `ACS` (case-insensitive)
 
 ### List Datasets
-The `list-datasets` tool is used for fetching a subset of metadata for all datasets that are available in the Census Bureau's API (~1,700 entries, including every published vintage). Prefer the programs/components flow above for orientation; use this for the complete vintage list. \
-It requires no arguments.
+The `list-datasets` tool returns catalog metadata (dataset ID, title, published vintages) for the aggregate datasets available in the Census Bureau's API. With no arguments it returns the whole catalog (~250 datasets); pass a filter to keep the response small. Prefer the programs/components flow above for orientation. It accepts the following optional arguments:
+* Dataset (Optional) - An exact dataset ID, e.g. `acs/acs5`, to get just that dataset's vintages
+* Query (Optional) - Words that must all appear in the dataset ID or title, e.g. `acs5 profile`
 
 ### Search Data Tables
-The `search-data-tables` tool searches 32,000+ Census tables by ID prefix, label, or API endpoint to find the correct `table_id` and cell codes before calling `fetch-aggregate-data`. It accepts the following arguments (at least one of the first three is required):
+The `search-data-tables` tool searches 32,000+ Census tables by ID prefix, label, or API endpoint to find the correct `table_id` before calling `list-table-variables` and `fetch-aggregate-data`. It accepts the following arguments (at least one of the first three is required):
 * Data Table ID (Optional) - Table ID or prefix, e.g. `B16005`
 * Label Query (Optional) - Natural-language phrase matched against table labels, e.g. `language spoken at home`
 * API Endpoint (Optional) - Scope results to one dataset, e.g. `acs/acs1`
 * Limit (Optional) - Maximum results to return (default `20`)
+
+### List Table Variables
+The `list-table-variables` tool lists a table's cell codes and labels for a given dataset and vintage, read from the dataset's `variables.json`, so every code it returns is one `fetch-aggregate-data` accepts. Only estimate codes are listed; margin-of-error companions are paired automatically when data is fetched. It accepts the following arguments:
+* Dataset (Required) - The identifier of the dataset, e.g. `acs/acs5`
+* Year (Required) - The vintage of the dataset, e.g. `2023`
+* Table ID (Required) - The table from `search-data-tables`, e.g. `B19013`
+* Label Filter (Optional) - A case-insensitive substring to narrow the variables by label, e.g. `female`
+* Limit (Optional) - Maximum variables to return (default `100`, max `500`)
 
 ### Fetch Dataset Geography
 The `fetch-dataset-geography` tool is used for fetching available geography levels for filtering a given dataset. It accepts the following arguments:

@@ -45,6 +45,12 @@ vi.mock('../src/tools/search-data-tables.tool.js', () => ({
     .mockImplementation(() => ({ name: 'search-data-tables' })),
 }))
 
+vi.mock('../src/tools/list-table-variables.tool.js', () => ({
+  ListTableVariablesTool: vi
+    .fn()
+    .mockImplementation(() => ({ name: 'list-table-variables' })),
+}))
+
 vi.mock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
   StdioServerTransport: vi.fn().mockImplementation(() => ({})),
 }))
@@ -75,7 +81,7 @@ describe('main', () => {
       name: 'population-prompt',
     })
 
-    expect(toolRegistrySpy).toHaveBeenCalledTimes(7)
+    expect(toolRegistrySpy).toHaveBeenCalledTimes(8)
 
     expect(toolRegistrySpy).toHaveBeenCalledWith({
       name: 'fetch-aggregate-data',
@@ -94,6 +100,10 @@ describe('main', () => {
 
     expect(toolRegistrySpy).toHaveBeenCalledWith({
       name: 'search-data-tables',
+    })
+
+    expect(toolRegistrySpy).toHaveBeenCalledWith({
+      name: 'list-table-variables',
     })
 
     expect(connectSpy).toHaveBeenCalledTimes(1)
