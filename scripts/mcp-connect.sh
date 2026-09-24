@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Prevent Git Bash on Windows from mangling container paths like /app/dist/index.js
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL="*"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
