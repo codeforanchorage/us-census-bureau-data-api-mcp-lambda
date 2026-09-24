@@ -67,7 +67,7 @@ resource "aws_lambda_function" "mcp_server" {
   role             = aws_iam_role.lambda_role.arn
   handler          = "dist/lambda.handler"
   source_code_hash = local.lambda_zip_hash
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   memory_size      = var.lambda_memory
   timeout          = var.lambda_timeout
 
