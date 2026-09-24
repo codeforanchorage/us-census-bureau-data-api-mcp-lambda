@@ -10,11 +10,13 @@ import { ErrorThrowingTool, MockFetchSummaryTableTool } from './mocks/tool.mock'
 import { MockTestPrompt, ErrorThrowingPrompt } from './mocks/prompt.mock'
 
 vi.mock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
-  StdioServerTransport: vi.fn().mockImplementation(() => ({
-    start() {
-      return true
-    },
-  })),
+  StdioServerTransport: vi.fn().mockImplementation(function () {
+    return {
+      start() {
+        return true
+      },
+    }
+  }),
 }))
 
 describe('MCP Server', () => {

@@ -3,8 +3,12 @@ import { describe, expect, it, vi } from 'vitest'
 // The real tools construct DatabaseService (a pg Pool) in their
 // constructors; mock the driver so createServer() is side-effect free.
 vi.mock('pg', () => ({
-  Pool: vi.fn().mockImplementation(() => ({})),
-  Client: vi.fn().mockImplementation(() => ({})),
+  Pool: vi.fn().mockImplementation(function () {
+    return {}
+  }),
+  Client: vi.fn().mockImplementation(function () {
+    return {}
+  }),
 }))
 
 import { createServer } from '../src/createServer'

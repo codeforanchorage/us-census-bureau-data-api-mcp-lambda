@@ -23,9 +23,11 @@ describe('database error hygiene', () => {
       connect: vi.fn().mockResolvedValue(mockClient),
       end: vi.fn(),
     }
-    vi.mocked(Pool).mockImplementation(
-      () => mockPool as unknown as InstanceType<typeof Pool>,
-    )
+    // A `function`, not an arrow: Vitest 4 mocks must be constructible
+    // because DatabaseService calls `new Pool(...)`.
+    vi.mocked(Pool).mockImplementation(function () {
+      return mockPool as unknown as InstanceType<typeof Pool>
+    })
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
   })
 

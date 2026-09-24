@@ -48,8 +48,12 @@ describe('DatabaseService', () => {
     }
 
     // Mock constructors
-    vi.mocked(Pool).mockImplementation(() => mockPool)
-    vi.mocked(Client).mockImplementation(() => mockPersistentClient)
+    vi.mocked(Pool).mockImplementation(function () {
+      return mockPool
+    })
+    vi.mocked(Client).mockImplementation(function () {
+      return mockPersistentClient
+    })
   })
 
   afterEach(() => {

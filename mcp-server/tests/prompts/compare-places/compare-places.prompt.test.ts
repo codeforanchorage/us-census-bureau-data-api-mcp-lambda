@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('pg', () => ({
-  Pool: vi.fn().mockImplementation(() => ({})),
-  Client: vi.fn().mockImplementation(() => ({})),
+  Pool: vi.fn().mockImplementation(function () {
+    return {}
+  }),
+  Client: vi.fn().mockImplementation(function () {
+    return {}
+  }),
 }))
 
 import { createServer } from '../../../src/createServer'

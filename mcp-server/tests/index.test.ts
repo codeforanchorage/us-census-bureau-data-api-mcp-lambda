@@ -10,55 +10,57 @@ import {
 import { MCPServer } from '../src/server'
 
 vi.mock('../src/tools/list-datasets.tool.js', () => ({
-  ListDatasetsTool: vi
-    .fn()
-    .mockImplementation(() => ({ name: 'list-datasets' })),
+  ListDatasetsTool: vi.fn().mockImplementation(function () {
+    return { name: 'list-datasets' }
+  }),
 }))
 
 vi.mock('../src/tools/fetch-dataset-geography.tool.js', () => ({
-  FetchDatasetGeographyTool: vi
-    .fn()
-    .mockImplementation(() => ({ name: 'fetch-dataset-geography' })),
+  FetchDatasetGeographyTool: vi.fn().mockImplementation(function () {
+    return { name: 'fetch-dataset-geography' }
+  }),
 }))
 
 vi.mock('../src/tools/fetch-aggregate-data.tool.js', () => ({
-  FetchAggregateDataTool: vi
-    .fn()
-    .mockImplementation(() => ({ name: 'fetch-aggregate-data' })),
+  FetchAggregateDataTool: vi.fn().mockImplementation(function () {
+    return { name: 'fetch-aggregate-data' }
+  }),
 }))
 
 vi.mock('../src/prompts/compare-places.prompt.js', () => ({
-  ComparePlacesPrompt: vi
-    .fn()
-    .mockImplementation(() => ({ name: 'compare-places-prompt' })),
+  ComparePlacesPrompt: vi.fn().mockImplementation(function () {
+    return { name: 'compare-places-prompt' }
+  }),
 }))
 
 vi.mock('../src/prompts/population.prompt.js', () => ({
-  PopulationPrompt: vi
-    .fn()
-    .mockImplementation(() => ({ name: 'population-prompt' })),
+  PopulationPrompt: vi.fn().mockImplementation(function () {
+    return { name: 'population-prompt' }
+  }),
 }))
 
 vi.mock('../src/tools/resolve-geography-fips.tool.js', () => ({
-  ResolveGeographyFipsTool: vi
-    .fn()
-    .mockImplementation(() => ({ name: 'resolve-geography-fips' })),
+  ResolveGeographyFipsTool: vi.fn().mockImplementation(function () {
+    return { name: 'resolve-geography-fips' }
+  }),
 }))
 
 vi.mock('../src/tools/search-data-tables.tool.js', () => ({
-  SearchDataTablesTool: vi
-    .fn()
-    .mockImplementation(() => ({ name: 'search-data-tables' })),
+  SearchDataTablesTool: vi.fn().mockImplementation(function () {
+    return { name: 'search-data-tables' }
+  }),
 }))
 
 vi.mock('../src/tools/list-table-variables.tool.js', () => ({
-  ListTableVariablesTool: vi
-    .fn()
-    .mockImplementation(() => ({ name: 'list-table-variables' })),
+  ListTableVariablesTool: vi.fn().mockImplementation(function () {
+    return { name: 'list-table-variables' }
+  }),
 }))
 
 vi.mock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
-  StdioServerTransport: vi.fn().mockImplementation(() => ({})),
+  StdioServerTransport: vi.fn().mockImplementation(function () {
+    return {}
+  }),
 }))
 
 describe('main', () => {
