@@ -10,6 +10,7 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
+import { SERVER_INSTRUCTIONS } from './instructions.js'
 import { MCPPrompt, PromptRegistry } from './prompts/base.prompt.js'
 import {
   MCPTool,
@@ -30,6 +31,7 @@ export class MCPServer {
           tools: {},
           prompts: {},
         },
+        instructions: SERVER_INSTRUCTIONS,
       },
     )
     this.setupHandlers()

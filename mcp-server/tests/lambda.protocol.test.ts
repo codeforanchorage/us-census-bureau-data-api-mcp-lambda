@@ -14,6 +14,7 @@ vi.mock('../src/services/database.service.js', () => ({
 }))
 
 import { handler } from '../src/lambda'
+import { SERVER_INSTRUCTIONS } from '../src/instructions'
 import { SERVER_NAME, SERVER_VERSION } from '../src/version'
 
 function postEvent(
@@ -85,6 +86,14 @@ describe('protocol version negotiation', () => {
       name: SERVER_NAME,
       version: SERVER_VERSION,
     })
+  })
+
+  it('returns server instructions on every negotiated revision', async () => {
+    for (const version of ['2025-11-25', '2024-11-05']) {
+      const response = await handler(initializeEvent(version))
+      const body = JSON.parse(response.body)
+      expect(body.result.instructions).toBe(SERVER_INSTRUCTIONS)
+    }
   })
 })
 

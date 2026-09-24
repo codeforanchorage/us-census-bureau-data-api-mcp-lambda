@@ -18,6 +18,7 @@ import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js'
 import { createServer } from './createServer.js'
 import { MCPServer } from './server.js'
 import { DatabaseService } from './services/database.service.js'
+import { SERVER_INSTRUCTIONS } from './instructions.js'
 import { SERVER_NAME, SERVER_VERSION } from './version.js'
 
 type LambdaEvent = {
@@ -193,7 +194,13 @@ async function getServer(): Promise<MCPServer> {
       // Touch DatabaseService so pool initializes on cold start, not first query
       DatabaseService.getInstance()
       return createServer()
-    })()
+    })().catch((err) => {
+      // Don't memoize a failed cold start: one transient Secrets Manager
+      // error would otherwise 500 every request this warm container serves
+      // until Lambda recycles it. Clearing lets the next request retry.
+      serverPromise = null
+      throw err
+    })
   }
   return serverPromise
 }
@@ -345,6 +352,7 @@ async function dispatch(
           ),
           capabilities: { tools: {}, prompts: {} },
           serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
+          instructions: SERVER_INSTRUCTIONS,
         }
         break
 

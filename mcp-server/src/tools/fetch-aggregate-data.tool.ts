@@ -2,7 +2,7 @@ import { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 
 import { BaseTool } from './base.tool.js'
-import { fetchWithTimeout } from '../helpers/http.js'
+import { fetchWithTimeout, redactApiKey } from '../helpers/http.js'
 import { formatAggregateResponse } from '../helpers/response-format.js'
 import {
   CacheDuration,
@@ -229,9 +229,7 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
       } else {
         const res = await fetchWithTimeout(url)
 
-        console.log(
-          `URL Attempted: ${url.replace(/key=[^&]*/g, 'key=REDACTED')}`,
-        )
+        console.log(`URL Attempted: ${redactApiKey(url)}`)
 
         if (!res.ok) {
           return this.createErrorResponse(

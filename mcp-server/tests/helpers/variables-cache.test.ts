@@ -78,6 +78,35 @@ describe('fetchVariablesIndex', () => {
     const idx = await fetchVariablesIndex('xyz/abc', 9999)
     expect(idx).toBeNull()
   })
+
+  it('keeps a definitive 4xx miss cached', async () => {
+    mockFetch.mockReturnValue(
+      Promise.resolve(new Response('nope', { status: 404 })),
+    )
+    await fetchVariablesIndex('xyz/abc', 9999)
+    await fetchVariablesIndex('xyz/abc', 9999)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not cache a network failure -- the next call retries', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('ECONNRESET'))
+    expect(await fetchVariablesIndex('acs/acs5', 2019, 'KEY')).toBeNull()
+
+    mockFetch.mockReturnValueOnce(mockResponse(variablesJson))
+    const idx = await fetchVariablesIndex('acs/acs5', 2019, 'KEY')
+    expect(idx!.byName.get('B25001_001E')?.moePair).toBe('B25001_001M')
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not cache a 5xx -- the next call retries', async () => {
+    mockFetch.mockReturnValueOnce(
+      Promise.resolve(new Response('oops', { status: 503 })),
+    )
+    expect(await fetchVariablesIndex('acs/acs5', 2019, 'KEY')).toBeNull()
+
+    mockFetch.mockReturnValueOnce(mockResponse(variablesJson))
+    expect(await fetchVariablesIndex('acs/acs5', 2019, 'KEY')).not.toBeNull()
+  })
 })
 
 describe('labelForCell + prettyLabel', () => {
