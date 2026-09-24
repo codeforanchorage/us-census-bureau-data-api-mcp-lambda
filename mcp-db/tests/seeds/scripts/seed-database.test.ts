@@ -102,7 +102,11 @@ async function setupMockSeedRunner(
 ) {
   const SeedRunnerSpy = vi
     .spyOn(await import('../../../src/seeds/scripts/seed-runner'), 'SeedRunner')
-    .mockImplementation(() => mockRunner as unknown as SeedRunner)
+    // A `function`, not an arrow: Vitest 4 mocks must be constructible
+    // because runSeeds calls `new SeedRunner(...)`.
+    .mockImplementation(function () {
+      return mockRunner as unknown as SeedRunner
+    })
 
   return {
     mockRunner,
