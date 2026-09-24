@@ -153,21 +153,23 @@ describe('SearchDataTablesTool', () => {
   })
 
   describe('Database Integration', () => {
-    it('should check database health before querying', async () => {
+    it('should not spend a round trip on a separate health check', async () => {
       await tool.handler(byIdArgs)
 
-      expect(mockDbService.healthCheck).toHaveBeenCalledOnce()
+      expect(mockDbService.healthCheck).not.toHaveBeenCalled()
+      expect(mockDbService.query).toHaveBeenCalledOnce()
     })
 
-    it('should return error when database is unhealthy', async () => {
-      mockDbService.healthCheck.mockResolvedValue(false)
+    it('should pass the sanitized database error through without stale advice', async () => {
+      mockDbService.query.mockRejectedValue(
+        new Error('The database is temporarily unavailable. Retry after a short delay.'),
+      )
 
       const response = await tool.handler(byIdArgs)
-      validateResponseStructure(response)
-      expect(getTextContent(response).text).toContain(
-        'Database connection failed',
+      expect(response.isError).toBe(true)
+      expect(getTextContent(response).text).toBe(
+        'Failed to search data tables: The database is temporarily unavailable. Retry after a short delay.',
       )
-      expect(getTextContent(response).text).toContain('cannot search data tables')
     })
 
     it('should handle database query errors gracefully', async () => {

@@ -43,13 +43,6 @@ export class ListSurveyComponentsTool extends BaseTool<ListSurveyComponentsArgs>
 
   async toolHandler(args: ListSurveyComponentsArgs): Promise<ToolResponse> {
     try {
-      const isDbHealthy = await this.dbService.healthCheck()
-      if (!isDbHealthy) {
-        return this.createErrorResponse(
-          'Database connection failed; cannot list survey components. Retry after a short delay.',
-        )
-      }
-
       // Acronyms are stored uppercase; be forgiving about input case.
       const programString = args.program_string.trim().toUpperCase()
 

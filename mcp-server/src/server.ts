@@ -118,6 +118,7 @@ export class MCPServer {
     return {
       prompts: this.promptRegistry.getAll().map((prompt) => ({
         name: prompt.name,
+        ...(prompt.title ? { title: prompt.title } : {}),
         description: prompt.description,
         arguments: prompt.arguments,
       })),

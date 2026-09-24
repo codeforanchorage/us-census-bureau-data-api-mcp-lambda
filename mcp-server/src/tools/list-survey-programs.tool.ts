@@ -45,13 +45,6 @@ export class ListSurveyProgramsTool extends BaseTool<ListSurveyProgramsArgs> {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async toolHandler(args: ListSurveyProgramsArgs): Promise<ToolResponse> {
     try {
-      const isDbHealthy = await this.dbService.healthCheck()
-      if (!isDbHealthy) {
-        return this.createErrorResponse(
-          'Database connection failed; cannot list survey programs. Retry after a short delay.',
-        )
-      }
-
       const result = await this.dbService.query<SurveyProgramRow>(
         `SELECT * FROM list_survey_programs()`,
         [],

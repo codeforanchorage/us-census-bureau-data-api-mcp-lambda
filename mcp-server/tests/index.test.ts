@@ -27,6 +27,12 @@ vi.mock('../src/tools/fetch-aggregate-data.tool.js', () => ({
     .mockImplementation(() => ({ name: 'fetch-aggregate-data' })),
 }))
 
+vi.mock('../src/prompts/compare-places.prompt.js', () => ({
+  ComparePlacesPrompt: vi
+    .fn()
+    .mockImplementation(() => ({ name: 'compare-places-prompt' })),
+}))
+
 vi.mock('../src/prompts/population.prompt.js', () => ({
   PopulationPrompt: vi
     .fn()
@@ -76,9 +82,12 @@ describe('main', () => {
   it('should register tools and prompts and connect to the MCP Server', async () => {
     await import('../src/index.ts')
 
-    expect(promptRegistrySpy).toHaveBeenCalledTimes(1)
+    expect(promptRegistrySpy).toHaveBeenCalledTimes(2)
     expect(promptRegistrySpy).toHaveBeenCalledWith({
       name: 'population-prompt',
+    })
+    expect(promptRegistrySpy).toHaveBeenCalledWith({
+      name: 'compare-places-prompt',
     })
 
     expect(toolRegistrySpy).toHaveBeenCalledTimes(8)

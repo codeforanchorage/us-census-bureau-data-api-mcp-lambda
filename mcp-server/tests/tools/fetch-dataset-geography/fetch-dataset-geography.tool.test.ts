@@ -195,18 +195,35 @@ describe('FetchDatasetGeographyTool', () => {
   })
 
   describe('Database Integration', () => {
-    it('should return error when database is unhealthy', async () => {
-      mockDbService.healthCheck.mockResolvedValue(false)
+    it('should not double up retry advice on a sanitized database error', async () => {
+      mockDbService.query.mockRejectedValue(
+        new Error(
+          'The database is temporarily unavailable. Retry after a short delay.',
+        ),
+      )
 
-      const args = {
-        dataset: 'acs/acs1',
-        year: 2022,
-      }
+      const response = await tool.toolHandler(
+        { dataset: 'acs/acs1', year: 2022 },
+        process.env.CENSUS_API_KEY!,
+      )
+      expect((response.content[0] as TextContent).text).toBe(
+        'Failed to fetch dataset geography levels: The database is temporarily unavailable. Retry after a short delay.',
+      )
+    })
 
-      const response = await tool.toolHandler(args, process.env.CENSUS_API_KEY!)
-      validateResponseStructure(response)
-      expect((response.content[0] as TextContent).text).toContain(
-        'Database connection failed',
+    it('should add retry advice to a raw network error', async () => {
+      mockFetch.mockRejectedValue(
+        new Error(
+          'request to https://api.census.gov/x failed, reason: ECONNRESET',
+        ),
+      )
+
+      const response = await tool.toolHandler(
+        { dataset: 'acs/acs1', year: 2022 },
+        process.env.CENSUS_API_KEY!,
+      )
+      expect((response.content[0] as TextContent).text).toMatch(
+        /ECONNRESET Retry after a short delay\.$/,
       )
     })
 
@@ -220,7 +237,7 @@ describe('FetchDatasetGeographyTool', () => {
 
       await tool.toolHandler(args, process.env.CENSUS_API_KEY!)
 
-      expect(mockDbService.healthCheck).toHaveBeenCalled()
+      expect(mockDbService.healthCheck).not.toHaveBeenCalled()
 
       // Verify the SQL query structure
       const queryCall = mockDbService.query.mock.calls[0][0]
