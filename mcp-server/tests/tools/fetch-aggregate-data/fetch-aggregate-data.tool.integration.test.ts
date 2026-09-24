@@ -1,51 +1,55 @@
 import { describe, it, expect } from 'vitest'
 import { FetchAggregateDataTool } from '../../../src/tools/fetch-aggregate-data.tool'
+import { hasCensusApiKey, NEEDS_KEY } from '../../helpers/census-key'
 
-describe('FetchAggregateDataTool - Integration Tests', () => {
-  it('should fetch real ACS data', async () => {
-    const tool = new FetchAggregateDataTool()
-    const datasetName = 'acs/acs1'
-    const groupName = 'B17015'
+describe.skipIf(!hasCensusApiKey)(
+  `FetchAggregateDataTool - Integration Tests ${NEEDS_KEY}`,
+  () => {
+    it('should fetch real ACS data', async () => {
+      const tool = new FetchAggregateDataTool()
+      const datasetName = 'acs/acs1'
+      const groupName = 'B17015'
 
-    const response = await tool.toolHandler(
-      {
-        dataset: datasetName,
-        year: 2022,
-        get: {
-          group: groupName,
+      const response = await tool.toolHandler(
+        {
+          dataset: datasetName,
+          year: 2022,
+          get: {
+            group: groupName,
+          },
+          for: 'state:*',
         },
-        for: 'state:*',
-      },
-      process.env.CENSUS_API_KEY,
-    )
+        process.env.CENSUS_API_KEY,
+      )
 
-    expect(response.content[0].type).toBe('text')
-    const responseText = response.content[0].text
-    expect(responseText).toContain(`${datasetName}`)
-    expect(responseText).toContain(`${groupName}`)
-  }, 10000) // Longer timeout for real API calls
+      expect(response.content[0].type).toBe('text')
+      const responseText = response.content[0].text
+      expect(responseText).toContain(`${datasetName}`)
+      expect(responseText).toContain(`${groupName}`)
+    }, 10000) // Longer timeout for real API calls
 
-  it('should fetch real ACS data with complex geography definitions', async () => {
-    const tool = new FetchAggregateDataTool()
-    const datasetName = 'acs/acs5'
-    const groupName = 'B15003'
+    it('should fetch real ACS data with complex geography definitions', async () => {
+      const tool = new FetchAggregateDataTool()
+      const datasetName = 'acs/acs5'
+      const groupName = 'B15003'
 
-    const response = await tool.toolHandler(
-      {
-        dataset: datasetName,
-        year: 2022,
-        get: {
-          group: groupName,
+      const response = await tool.toolHandler(
+        {
+          dataset: datasetName,
+          year: 2022,
+          get: {
+            group: groupName,
+          },
+          for: 'tract:*',
+          in: 'state:17+county:031',
         },
-        for: 'tract:*',
-        in: 'state:17+county:031',
-      },
-      process.env.CENSUS_API_KEY,
-    )
+        process.env.CENSUS_API_KEY,
+      )
 
-    expect(response.content[0].type).toBe('text')
-    const responseText = response.content[0].text
-    expect(responseText).toContain(`${datasetName}`)
-    expect(responseText).toContain(`${groupName}`)
-  }, 10000) // Longer timeout for real API calls
-})
+      expect(response.content[0].type).toBe('text')
+      const responseText = response.content[0].text
+      expect(responseText).toContain(`${datasetName}`)
+      expect(responseText).toContain(`${groupName}`)
+    }, 10000) // Longer timeout for real API calls
+  },
+)

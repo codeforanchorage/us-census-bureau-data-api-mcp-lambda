@@ -7,20 +7,57 @@ import {
   beforeEach,
   afterEach,
 } from 'vitest'
+import Ajv from 'ajv'
 import { Client } from 'pg'
 
 import { DatabaseService } from '../../../src/services/database.service'
 import { databaseConfig } from '../../helpers/database-config'
 import { SearchDataTablesTool } from '../../../src/tools/search-data-tables.tool'
+import { SearchDataTablesOutputSchema } from '../../../src/schema/search-data-tables.schema'
+import { ToolResponse } from '../../../src/types/base.types'
 
-function getResponseText(
-  response: Awaited<ReturnType<SearchDataTablesTool['handler']>>,
-): string {
+type TableRecord = {
+  data_table_id: string
+  label: string
+  component: string | null
+  datasets: { year: string; endpoints: string[] }[]
+}
+type Structured = {
+  total_count: number | null
+  shown_count: number
+  records: TableRecord[]
+  caveats: { code: string; message: string }[]
+}
+
+const validate = new Ajv({ allowUnionTypes: true }).compile(
+  SearchDataTablesOutputSchema,
+)
+
+// Assert on structuredContent -- the binding, schema-validated contract --
+// rather than the rendered prose, which is presentation and changes shape.
+function structured(response: ToolResponse): Structured {
+  expect(response.isError).toBeUndefined()
+  expect(
+    validate(response.structuredContent),
+    JSON.stringify(validate.errors),
+  ).toBe(true)
+  return response.structuredContent as Structured
+}
+
+function getResponseText(response: ToolResponse): string {
   const item = response.content[0]
   if (item.type !== 'text') {
     throw new Error(`Expected text content, got "${item.type}"`)
   }
   return (item as { type: 'text'; text: string }).text
+}
+
+function tableIds(s: Structured): string[] {
+  return s.records.map((r) => r.data_table_id).sort()
+}
+
+function yearsOf(record: TableRecord): Record<string, string[]> {
+  return Object.fromEntries(record.datasets.map((d) => [d.year, d.endpoints]))
 }
 
 describe('SearchDataTablesTool - Integration Tests', () => {
@@ -167,128 +204,111 @@ describe('SearchDataTablesTool - Integration Tests', () => {
 
   it('returns the expected table when a full data_table_id is provided', async () => {
     const response = await tool.handler({ data_table_id: 'B19001' })
+    const s = structured(response)
 
-    const text = getResponseText(response)
-
-    expect(text).toContain('Found 1 Matching Data Table:')
-    expect(text).toContain('B19001')
-    expect(text).toContain('Household Income In The Past 12 Months')
+    expect(s.total_count).toBe(1)
+    expect(s.records[0]).toMatchObject({
+      data_table_id: 'B19001',
+      label: 'Household Income In The Past 12 Months',
+    })
+    expect(getResponseText(response)).toContain('data_table_id: B19001')
   })
 
   it('returns all tables matching a data_table_id prefix', async () => {
-    const response = await tool.handler({ data_table_id: 'B16005' })
+    const s = structured(await tool.handler({ data_table_id: 'B16005' }))
 
-    const text = getResponseText(response)
-
-    expect(text).toContain('Found 2 Matching Data Tables:')
-    expect(text).toContain('B16005')
-    expect(text).toContain('B16005D')
-    expect(text).not.toContain('B19001')
+    expect(tableIds(s)).toEqual(['B16005', 'B16005D'])
   })
 
-  it('returns no results for an unknown data_table_id', async () => {
+  it('reports a known zero with NO_MATCH for an unknown data_table_id', async () => {
     const response = await tool.handler({ data_table_id: 'ZZZZZZ' })
+    const s = structured(response)
 
-    const text = getResponseText(response)
-
-    expect(text).toBe('No data tables found matching table ID "ZZZZZZ".')
+    expect(s.total_count).toBe(0)
+    expect(s.caveats.map((c) => c.code)).toEqual(['NO_MATCH'])
+    expect(getResponseText(response)).toContain(
+      'No data tables matched data_table_id "ZZZZZZ".',
+    )
   })
 
   it('returns tables whose canonical label fuzzy-matches the query', async () => {
-    const response = await tool.handler({
-      label_query: 'language spoken at home',
-    })
+    const s = structured(
+      await tool.handler({ label_query: 'language spoken at home' }),
+    )
 
-    const text = getResponseText(response)
-
-    expect(text).toContain('B16005')
-    expect(text).toContain('B16005D')
-    expect(text).not.toContain('B19001')
+    expect(tableIds(s)).toEqual(['B16005', 'B16005D'])
   })
 
   it('returns tables matching an income label query', async () => {
-    const response = await tool.handler({ label_query: 'household income' })
+    const s = structured(
+      await tool.handler({ label_query: 'household income' }),
+    )
 
-    const text = getResponseText(response)
-
-    expect(text).toContain('B19001')
-    expect(text).toContain('Household Income In The Past 12 Months')
+    expect(tableIds(s)).toEqual(['B19001'])
+    expect(s.records[0].label).toBe('Household Income In The Past 12 Months')
   })
 
-  it('returns no results for a label query with no similarity match', async () => {
+  it('reports NO_MATCH for a label query with no similarity match', async () => {
     const response = await tool.handler({
       label_query: 'xyzzy nonexistent topic',
     })
+    const s = structured(response)
 
-    const text = getResponseText(response)
-
-    expect(text).toBe(
-      'No data tables found matching label "xyzzy nonexistent topic".',
+    expect(s.total_count).toBe(0)
+    expect(s.caveats.map((c) => c.code)).toEqual(['NO_MATCH'])
+    expect(getResponseText(response)).toContain(
+      'No data tables matched label_query "xyzzy nonexistent topic".',
     )
   })
 
   it('returns only tables belonging to the specified api_endpoint', async () => {
-    const response = await tool.handler({ api_endpoint: 'acs/acs1' })
+    const s = structured(await tool.handler({ api_endpoint: 'acs/acs1' }))
 
-    const text = getResponseText(response)
-
-    expect(text).toContain('Found 3 Matching Data Tables:')
-    expect(text).toContain('B16005')
-    expect(text).toContain('B16005D')
-    expect(text).toContain('B19001')
+    expect(tableIds(s)).toEqual(['B16005', 'B16005D', 'B19001'])
   })
 
-  it('returns no results for an unknown api_endpoint', async () => {
+  it('reports NO_MATCH for an unknown api_endpoint', async () => {
     const response = await tool.handler({ api_endpoint: 'unknown/endpoint' })
+    const s = structured(response)
 
-    const text = getResponseText(response)
-
-    expect(text).toBe(
-      'No data tables found matching api endpoint "unknown/endpoint".',
+    expect(s.total_count).toBe(0)
+    expect(getResponseText(response)).toContain(
+      'No data tables matched api_endpoint "unknown/endpoint".',
     )
   })
 
-  it('returns no results when the label matches but the api_endpoint filter excludes it', async () => {
-    const response = await tool.handler({
-      label_query: 'household income',
-      api_endpoint: 'dec/sf1',
-    })
+  it('reports NO_MATCH when the label matches but the api_endpoint filter excludes it', async () => {
+    const s = structured(
+      await tool.handler({
+        label_query: 'household income',
+        api_endpoint: 'dec/sf1',
+      }),
+    )
 
-    const text = getResponseText(response)
-
-    expect(text).toContain('No data tables found matching')
-    expect(text).toContain('label "household income"')
-    expect(text).toContain('api endpoint "dec/sf1"')
+    expect(s.total_count).toBe(0)
+    const message = s.caveats[0].message
+    expect(message).toContain('label_query "household income"')
+    expect(message).toContain('api_endpoint "dec/sf1"')
   })
 
   it('includes component and datasets map in each result', async () => {
-    const response = await tool.handler({ data_table_id: 'B19001' })
+    const s = structured(await tool.handler({ data_table_id: 'B19001' }))
 
-    const text = getResponseText(response)
-    const parsed = JSON.parse(text.split('\n\n')[1])
-
-    const table = parsed[0]
+    const table = s.records[0]
     expect(table.component).toBe(
       'American Community Survey - ACS 1-Year Supplemental Estimates',
     )
-    expect(typeof table.datasets).toBe('object')
-    expect(Array.isArray(table.datasets)).toBe(false)
-    expect(table.datasets['2019']).toEqual(['acs/acs1'])
+    expect(yearsOf(table)).toEqual({ '2019': ['acs/acs1'] })
   })
 
   it('aggregates datasets by year for the same component', async () => {
-    const response = await tool.handler({ data_table_id: 'B16005' })
+    const s = structured(await tool.handler({ data_table_id: 'B16005' }))
 
-    const text = getResponseText(response)
-    const parsed = JSON.parse(text.split('\n\n')[1])
-
-    const table = parsed.find(
-      (t: { data_table_id: string }) => t.data_table_id === 'B16005',
-    )
-
-    expect(typeof table.datasets).toBe('object')
-    expect(table.datasets['2009']).toEqual(['acs/acs1'])
-    expect(table.datasets['2010']).toEqual(['acs/acs1'])
+    const table = s.records.find((t) => t.data_table_id === 'B16005')!
+    expect(yearsOf(table)).toEqual({
+      '2009': ['acs/acs1'],
+      '2010': ['acs/acs1'],
+    })
   })
 
   it('groups orphan datasets by api_endpoint across multiple years', async () => {
@@ -324,26 +344,25 @@ describe('SearchDataTablesTool - Integration Tests', () => {
         )
     `)
 
-    const response = await tool.handler({ data_table_id: 'ARTS01' })
-    const text = getResponseText(response)
-    const parsed = JSON.parse(text.split('\n\n')[1])
-
-    const table = parsed[0]
+    const s = structured(await tool.handler({ data_table_id: 'ARTS01' }))
+    const table = s.records[0]
 
     // Component label falls back to api_endpoint for orphans
     expect(table.component).toBe('cps/arts/feb')
-
     // Each year maps to the orphan's api_endpoint
-    expect(typeof table.datasets).toBe('object')
-    expect(table.datasets['2009']).toEqual(['cps/arts/feb'])
-    expect(table.datasets['2010']).toEqual(['cps/arts/feb'])
+    expect(yearsOf(table)).toEqual({
+      '2009': ['cps/arts/feb'],
+      '2010': ['cps/arts/feb'],
+    })
   })
 
-  it('respects the limit parameter', async () => {
-    const response = await tool.handler({ data_table_id: 'B', limit: 1 })
+  it('respects the limit parameter and flags the truncation', async () => {
+    const s = structured(await tool.handler({ data_table_id: 'B', limit: 1 }))
 
-    const text = getResponseText(response)
-
-    expect(text).toContain('Found 1 Matching Data Table:')
+    expect(s.shown_count).toBe(1)
+    expect(s.records).toHaveLength(1)
+    // A full page means more may exist: the total is unmeasured, not 1.
+    expect(s.total_count).toBeNull()
+    expect(s.caveats.map((c) => c.code)).toContain('TRUNCATED')
   })
 })
