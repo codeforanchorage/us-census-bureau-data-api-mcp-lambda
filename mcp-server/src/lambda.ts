@@ -16,6 +16,14 @@ import { z } from 'zod'
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js'
 
 import { createServer } from './createServer.js'
+import {
+  META_CLIENT_INFO,
+  MODERN_PROTOCOL_VERSIONS,
+  isModernRequest,
+  modernResult,
+  requestMeta,
+  validateModernRequest,
+} from './modern-protocol.js'
 import { MCPServer } from './server.js'
 import { DatabaseService } from './services/database.service.js'
 import { SERVER_INSTRUCTIONS } from './instructions.js'
@@ -66,7 +74,7 @@ const ALLOWED_ORIGINS = new Set([
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers':
-    'content-type, mcp-session-id, mcp-protocol-version',
+    'content-type, mcp-session-id, mcp-protocol-version, mcp-method, mcp-name',
   'Access-Control-Expose-Headers': 'x-request-id, mcp-session-id',
 }
 
@@ -95,17 +103,17 @@ function originRejection(origin: string): LambdaResponse {
   }
 }
 
-// Protocol revisions this server speaks, newest first. The tools/prompts
-// wire format is identical across all four -- each newer revision's
-// additions (elicitation, structured-output extras, tasks) are optional
-// and unused here -- so supporting a revision means nothing more than
-// echoing it back in the initialize negotiation. 2024-11-05 stays in the
-// list deliberately: M365 Copilot (GCC) is a first-class consumer and its
-// connector still opens with the oldest revision.
+// Legacy (initialize-based) protocol revisions, newest first. The
+// tools/prompts wire format is identical across all four -- each newer
+// revision's additions (elicitation, structured-output extras, tasks) are
+// optional and unused here -- so supporting a revision means nothing more
+// than echoing it back in the initialize negotiation. 2024-11-05 stays in
+// the list deliberately: M365 Copilot (GCC) is a first-class consumer and
+// its connector still opens with the oldest revision.
 //
-// Do NOT add 2026-07-28. That revision replaces the initialize handshake
-// with per-request _meta plus a mandatory server/discover RPC -- adopting
-// it is a dual-era transport migration, not a version-string addition.
+// 2026-07-28 is NOT in this list on purpose: it has no initialize. Requests
+// carrying its per-request _meta are served by the modern path
+// (modern-protocol.ts, MODERN_PROTOCOL_VERSIONS); this server is dual-era.
 const SUPPORTED_PROTOCOL_VERSIONS = [
   '2025-11-25',
   '2025-06-18',
@@ -246,15 +254,24 @@ function logUsage(
   sessionId: string | undefined,
   method: string,
   params: unknown,
+  era: Era,
 ): void {
-  const { name, clientInfo } = (params ?? {}) as {
+  type ClientInfo = { name?: unknown; version?: unknown }
+  const { name, clientInfo: initializeClientInfo } = (params ?? {}) as {
     name?: unknown
-    clientInfo?: { name?: unknown; version?: unknown }
+    clientInfo?: ClientInfo
   }
+  // Legacy clients identify themselves once, on initialize; 2026-07-28
+  // clients send clientInfo in every request's _meta.
+  const clientInfo =
+    era === 'modern'
+      ? (requestMeta(params)?.[META_CLIENT_INFO] as ClientInfo | undefined)
+      : initializeClientInfo
 
   process.stdout.write(
     `${JSON.stringify({
       mcp_session_id: sessionId,
+      mcp_era: era,
       jsonrpc_method: method,
       jsonrpc_params: {
         ...(typeof name === 'string' ? { name } : {}),
@@ -289,14 +306,14 @@ function getSessionId(
   return fromHeader ?? (method === 'initialize' ? randomUUID() : undefined)
 }
 
-// Since revision 2025-06-18, Streamable HTTP clients send an
-// MCP-Protocol-Version header on every post-handshake request. Absent means
-// an older client -- the spec says assume 2025-03-26, which we support, so
-// pass through untouched. Present but unrecognized gets HTTP 400 with a
-// JSON-RPC -32600 -- deliberately NOT the 2026-07-28-era -32022
-// UnsupportedProtocolVersionError, which would make a dual-era client retry
-// the new server/discover handshake; 400/-32600 makes it read us as a
-// legacy server and fall back to initialize, which is what we support.
+// Legacy requests only (modern ones are validated by
+// validateModernRequest). Since revision 2025-06-18, Streamable HTTP
+// clients send an MCP-Protocol-Version header on every post-handshake
+// request. Absent means an older client -- the spec says assume
+// 2025-03-26, which we support, so pass through untouched. Present but
+// unrecognized gets HTTP 400 with JSON-RPC -32600, as the legacy revisions
+// specify. (A modern client always sends _meta, so it never lands here; it
+// gets 2026-07-28's -32022 from the modern path instead.)
 function checkProtocolVersionHeader(
   event: LambdaEvent,
   id: string | number | null | undefined,
@@ -319,17 +336,56 @@ function errorResponse(
   code: number,
   message: string,
   statusCode = 200,
+  data?: Record<string, unknown>,
 ): LambdaResponse {
   return jsonResponse(statusCode, {
     jsonrpc: '2.0',
     id: id ?? null,
-    error: { code, message },
+    error: { code, message, ...(data ? { data } : {}) },
   })
+}
+
+// 'legacy' = an initialize-based revision (2024-11-05 .. 2025-11-25);
+// 'modern' = 2026-07-28 per-request _meta (see modern-protocol.ts).
+type Era = 'legacy' | 'modern'
+
+// Methods each era defines. initialize and ping were removed in
+// 2026-07-28; server/discover exists only there.
+const LEGACY_ONLY_METHODS = new Set([
+  'initialize',
+  'ping',
+  'notifications/initialized',
+])
+const MODERN_ONLY_METHODS = new Set(['server/discover'])
+
+// 2026-07-28 Streamable HTTP: an unimplemented method is HTTP 404 with
+// -32601 (the JSON-RPC body distinguishes it from a missing endpoint).
+// Legacy revisions keep the 200 they always got.
+function methodNotFound(
+  id: string | number | null | undefined,
+  method: string,
+  era: Era,
+): LambdaResponse {
+  return errorResponse(
+    id,
+    -32601,
+    `Method not found: ${method}`,
+    era === 'modern' ? 404 : 200,
+  )
+}
+
+// An accepted notification is 202. 2026-07-28 says "with no body"; legacy
+// clients have always received '{}' here, so they keep it.
+function accepted(era: Era): LambdaResponse {
+  const response = jsonResponse(202, {})
+  if (era === 'modern') response.body = ''
+  return response
 }
 
 async function dispatch(
   server: MCPServer,
   body: JsonRpcRequest,
+  era: Era,
 ): Promise<LambdaResponse> {
   const { id, method, params } = body
 
@@ -340,10 +396,26 @@ async function dispatch(
   // Notifications (no id) expect no response body
   const isNotification = id === undefined || id === null
 
+  const unknownForEra =
+    era === 'modern'
+      ? LEGACY_ONLY_METHODS.has(method)
+      : MODERN_ONLY_METHODS.has(method)
+  if (unknownForEra) {
+    return methodNotFound(id, method, era)
+  }
+
   try {
     let result: unknown
 
     switch (method) {
+      case 'server/discover':
+        result = {
+          supportedVersions: [...MODERN_PROTOCOL_VERSIONS],
+          capabilities: { tools: {}, prompts: {} },
+          instructions: SERVER_INSTRUCTIONS,
+        }
+        break
+
       case 'initialize':
         result = {
           protocolVersion: negotiateProtocolVersion(
@@ -358,7 +430,7 @@ async function dispatch(
 
       case 'notifications/initialized':
       case 'notifications/cancelled':
-        return jsonResponse(202, {})
+        return accepted(era)
 
       case 'ping':
         result = {}
@@ -385,13 +457,19 @@ async function dispatch(
         break
 
       default:
-        return errorResponse(id, -32601, `Method not found: ${method}`)
+        return methodNotFound(id, method, era)
     }
 
     if (isNotification) {
-      return jsonResponse(202, {})
+      return accepted(era)
     }
 
+    if (era === 'modern') {
+      result = modernResult(method, result, {
+        name: SERVER_NAME,
+        version: SERVER_VERSION,
+      })
+    }
     return jsonResponse(200, { jsonrpc: '2.0', id, result })
   } catch (err) {
     // Caller mistakes (bad params, unknown tool) are warnings, not server
@@ -452,19 +530,47 @@ async function routeRequest(event: LambdaEvent): Promise<LambdaResponse> {
     return errorResponse(null, -32700, 'Parse error: invalid JSON')
   }
 
-  const versionRejection = checkProtocolVersionHeader(event, parsed.id)
-  if (versionRejection) {
-    return versionRejection
+  const headerVersion = getHeader(event, 'mcp-protocol-version')
+  const era: Era = isModernRequest(headerVersion, parsed.params)
+    ? 'modern'
+    : 'legacy'
+
+  if (era === 'modern') {
+    const rejection = validateModernRequest(
+      {
+        protocolVersion: headerVersion,
+        method: getHeader(event, 'mcp-method'),
+        name: getHeader(event, 'mcp-name'),
+      },
+      parsed.method,
+      parsed.params,
+    )
+    if (rejection) {
+      return errorResponse(
+        parsed.id ?? null,
+        rejection.code,
+        rejection.message,
+        rejection.status,
+        rejection.data,
+      )
+    }
+  } else {
+    const versionRejection = checkProtocolVersionHeader(event, parsed.id)
+    if (versionRejection) {
+      return versionRejection
+    }
   }
 
-  const sessionId = getSessionId(event, parsed.method)
+  // 2026-07-28 has no sessions: never mint or echo mcp-session-id there.
+  const sessionId =
+    era === 'legacy' ? getSessionId(event, parsed.method) : undefined
   if (parsed.method) {
-    logUsage(sessionId, parsed.method, parsed.params)
+    logUsage(sessionId, parsed.method, parsed.params, era)
   }
 
   try {
     const server = await getServer()
-    const response = await dispatch(server, parsed)
+    const response = await dispatch(server, parsed, era)
     if (sessionId) {
       response.headers['mcp-session-id'] = sessionId
     }

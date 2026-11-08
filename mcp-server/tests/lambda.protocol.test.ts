@@ -130,12 +130,12 @@ describe('MCP-Protocol-Version header validation', () => {
 
   it('rejects an unrecognized header with HTTP 400 and JSON-RPC -32600', async () => {
     const response = await handler(
-      postEvent(ping, { 'MCP-Protocol-Version': '2026-07-28' }),
+      postEvent(ping, { 'MCP-Protocol-Version': '2099-01-01' }),
     )
     expect(response.statusCode).toBe(400)
     const body = JSON.parse(response.body)
     expect(body.error.code).toBe(-32600)
-    expect(body.error.message).toContain('2026-07-28')
+    expect(body.error.message).toContain('2099-01-01')
     // The rejection carries the request id so the client can correlate it.
     expect(body.id).toBe(7)
   })

@@ -14,384 +14,385 @@
 // Usage: node scripts/smoke-prod.mjs [base-url]
 //   default base-url: https://us-census.codeforanchorage.org/mcp
 
-const BASE_URL = process.argv[2] ?? 'https://us-census.codeforanchorage.org/mcp'
+const BASE_URL =
+  process.argv[2] ?? "https://us-census.codeforanchorage.org/mcp";
 
 const SENTINEL_NUMBERS = [
   -999999999, -888888888, -666666666, -555555555, -333333333, -222222222,
   -111111111,
-]
+];
 
-let failures = 0
-let passes = 0
+let failures = 0;
+let passes = 0;
 
-function check(name, ok, detail = '') {
+function check(name, ok, detail = "") {
   if (ok) {
-    passes++
-    console.log(`  PASS  ${name}`)
+    passes++;
+    console.log(`  PASS  ${name}`);
   } else {
-    failures++
-    console.log(`  FAIL  ${name}${detail ? ` -- ${detail}` : ''}`)
+    failures++;
+    console.log(`  FAIL  ${name}${detail ? ` -- ${detail}` : ""}`);
   }
 }
 
 async function post(body, headers = {}) {
   const res = await fetch(BASE_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...headers },
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body),
-  })
-  let json = null
+  });
+  let json = null;
   try {
-    json = await res.json()
+    json = await res.json();
   } catch {
     /* non-JSON body (e.g. WAF page) */
   }
-  return { status: res.status, json }
+  return { status: res.status, json };
 }
 
 function rpc(id, method, params) {
-  return { jsonrpc: '2.0', id, method, ...(params ? { params } : {}) }
+  return { jsonrpc: "2.0", id, method, ...(params ? { params } : {}) };
 }
 
 async function transportChecks() {
-  console.log('\n== Transport ==')
+  console.log("\n== Transport ==");
 
-  const ping = await post(rpc(1, 'ping'))
-  check('ping (no Origin) returns 200', ping.status === 200)
+  const ping = await post(rpc(1, "ping"));
+  check("ping (no Origin) returns 200", ping.status === 200);
   check(
-    'ping result is the empty object (spec shape)',
-    JSON.stringify(ping.json?.result) === '{}',
+    "ping result is the empty object (spec shape)",
+    JSON.stringify(ping.json?.result) === "{}",
     JSON.stringify(ping.json?.result),
-  )
+  );
 
   const allowed = await fetch(BASE_URL, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'Content-Type': 'application/json',
-      Origin: 'https://claude.ai',
+      "Content-Type": "application/json",
+      Origin: "https://claude.ai",
     },
-    body: JSON.stringify(rpc(2, 'ping')),
-  })
-  check('Origin https://claude.ai served 200', allowed.status === 200)
+    body: JSON.stringify(rpc(2, "ping")),
+  });
+  check("Origin https://claude.ai served 200", allowed.status === 200);
   check(
-    'allowed Origin echoed back (no wildcard)',
-    allowed.headers.get('access-control-allow-origin') === 'https://claude.ai',
-    String(allowed.headers.get('access-control-allow-origin')),
-  )
+    "allowed Origin echoed back (no wildcard)",
+    allowed.headers.get("access-control-allow-origin") === "https://claude.ai",
+    String(allowed.headers.get("access-control-allow-origin")),
+  );
 
-  const evil = await post(rpc(3, 'ping'), { Origin: 'https://evil.example' })
-  check('Origin https://evil.example refused with 403', evil.status === 403)
+  const evil = await post(rpc(3, "ping"), { Origin: "https://evil.example" });
+  check("Origin https://evil.example refused with 403", evil.status === 403);
 
-  const badVersion = await post(rpc(4, 'ping'), {
-    'MCP-Protocol-Version': '2026-07-28',
-  })
+  const badVersion = await post(rpc(4, "ping"), {
+    "MCP-Protocol-Version": "2099-01-01",
+  });
   check(
-    'unrecognized MCP-Protocol-Version -> 400',
+    "unrecognized MCP-Protocol-Version -> 400",
     badVersion.status === 400,
     String(badVersion.status),
-  )
+  );
   check(
-    '... with JSON-RPC -32600',
+    "... with JSON-RPC -32600",
     badVersion.json?.error?.code === -32600,
     JSON.stringify(badVersion.json?.error),
-  )
+  );
 
-  const goodVersion = await post(rpc(5, 'ping'), {
-    'MCP-Protocol-Version': '2025-11-25',
-  })
-  check('MCP-Protocol-Version 2025-11-25 -> 200', goodVersion.status === 200)
+  const goodVersion = await post(rpc(5, "ping"), {
+    "MCP-Protocol-Version": "2025-11-25",
+  });
+  check("MCP-Protocol-Version 2025-11-25 -> 200", goodVersion.status === 200);
 
-  const get = await fetch(BASE_URL, { method: 'GET' })
+  const get = await fetch(BASE_URL, { method: "GET" });
   check(
-    'GET /mcp is refused (403 at the gateway / 405 at the Lambda)',
+    "GET /mcp is refused (403 at the gateway / 405 at the Lambda)",
     get.status === 403 || get.status === 405,
     String(get.status),
-  )
+  );
 
-  const unknown = await post(rpc(6, 'server/discover'))
+  const unknown = await post(rpc(6, "server/discover"));
   check(
-    'unknown method -> -32601',
+    "legacy server/discover (no _meta) -> -32601",
     unknown.json?.error?.code === -32601,
     JSON.stringify(unknown.json?.error),
-  )
+  );
 }
 
 async function initializeChecks() {
-  console.log('\n== Initialize ==')
+  console.log("\n== Initialize ==");
   const init = await post(
-    rpc(10, 'initialize', {
-      protocolVersion: '2025-11-25',
+    rpc(10, "initialize", {
+      protocolVersion: "2025-11-25",
       capabilities: {},
-      clientInfo: { name: 'smoke-prod', version: '1' },
+      clientInfo: { name: "smoke-prod", version: "1" },
     }),
-  )
+  );
   check(
-    'negotiates the requested 2025-11-25',
-    init.json?.result?.protocolVersion === '2025-11-25',
+    "negotiates the requested 2025-11-25",
+    init.json?.result?.protocolVersion === "2025-11-25",
     init.json?.result?.protocolVersion,
-  )
+  );
   check(
-    'serverInfo carries a version (build identifiable)',
-    typeof init.json?.result?.serverInfo?.version === 'string' &&
-      init.json.result.serverInfo.version !== '0.1.0',
+    "serverInfo carries a version (build identifiable)",
+    typeof init.json?.result?.serverInfo?.version === "string" &&
+      init.json.result.serverInfo.version !== "0.1.0",
     init.json?.result?.serverInfo?.version,
-  )
+  );
   check(
-    'returns server instructions naming the workflow tools',
-    typeof init.json?.result?.instructions === 'string' &&
-      init.json.result.instructions.includes('list-table-variables'),
-  )
+    "returns server instructions naming the workflow tools",
+    typeof init.json?.result?.instructions === "string" &&
+      init.json.result.instructions.includes("list-table-variables"),
+  );
 
   const legacy = await post(
-    rpc(11, 'initialize', {
-      protocolVersion: '2024-11-05',
+    rpc(11, "initialize", {
+      protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: 'smoke-prod', version: '1' },
+      clientInfo: { name: "smoke-prod", version: "1" },
     }),
-  )
+  );
   check(
-    'still speaks 2024-11-05 for legacy clients (Copilot GCC)',
-    legacy.json?.result?.protocolVersion === '2024-11-05',
-  )
+    "still speaks 2024-11-05 for legacy clients (Copilot GCC)",
+    legacy.json?.result?.protocolVersion === "2024-11-05",
+  );
 }
 
 async function toolsListChecks() {
-  console.log('\n== tools/list ==')
-  const list = await post(rpc(20, 'tools/list'))
-  const tools = list.json?.result?.tools ?? []
-  check('lists 8 tools', tools.length === 8, String(tools.length))
+  console.log("\n== tools/list ==");
+  const list = await post(rpc(20, "tools/list"));
+  const tools = list.json?.result?.tools ?? [];
+  check("lists 8 tools", tools.length === 8, String(tools.length));
   check(
-    'every tool has a top-level title',
-    tools.every((t) => typeof t.title === 'string' && t.title.length > 0),
-  )
+    "every tool has a top-level title",
+    tools.every((t) => typeof t.title === "string" && t.title.length > 0),
+  );
   check(
-    'every tool declares an outputSchema',
-    tools.every((t) => t.outputSchema && t.outputSchema.type === 'object'),
-  )
+    "every tool declares an outputSchema",
+    tools.every((t) => t.outputSchema && t.outputSchema.type === "object"),
+  );
   check(
-    'every tool is annotated read-only, no idempotentHint',
+    "every tool is annotated read-only, no idempotentHint",
     tools.every(
       (t) =>
         t.annotations?.readOnlyHint === true &&
-        !('idempotentHint' in (t.annotations ?? {})),
+        !("idempotentHint" in (t.annotations ?? {})),
     ),
-  )
+  );
 }
 
 async function callTool(id, name, args) {
-  const res = await post(
-    rpc(id, 'tools/call', { name, arguments: args }),
-  )
-  return res.json?.result
+  const res = await post(rpc(id, "tools/call", { name, arguments: args }));
+  return res.json?.result;
 }
 
 function textOf(result) {
-  return result?.content?.map((c) => c.text ?? '').join('\n') ?? ''
+  return result?.content?.map((c) => c.text ?? "").join("\n") ?? "";
 }
 
 function sentinelNumbersIn(value) {
-  const hits = []
+  const hits = [];
   JSON.stringify(value, (key, v) => {
-    if (typeof v === 'number' && SENTINEL_NUMBERS.includes(v)) hits.push(v)
-    return v
-  })
-  return hits
+    if (typeof v === "number" && SENTINEL_NUMBERS.includes(v)) hits.push(v);
+    return v;
+  });
+  return hits;
 }
 
 async function structuredChecks() {
-  console.log('\n== structuredContent: hit ==')
-  const hit = await callTool(30, 'resolve-geography-fips', {
-    geography_name: 'Anchorage',
-  })
-  check('resolve hit is not an error', hit && hit.isError !== true)
-  const sc = hit?.structuredContent
-  check('structuredContent present on a hit', !!sc)
+  console.log("\n== structuredContent: hit ==");
+  const hit = await callTool(30, "resolve-geography-fips", {
+    geography_name: "Anchorage",
+  });
+  check("resolve hit is not an error", hit && hit.isError !== true);
+  const sc = hit?.structuredContent;
+  check("structuredContent present on a hit", !!sc);
   check(
-    'at least one record with a for= string',
+    "at least one record with a for= string",
     Array.isArray(sc?.records) &&
       sc.records.length >= 1 &&
-      typeof sc.records[0].for === 'string',
-  )
+      typeof sc.records[0].for === "string",
+  );
   check(
-    'total_count is a positive integer',
+    "total_count is a positive integer",
     Number.isInteger(sc?.total_count) && sc.total_count >= 1,
-  )
-  const hitText = textOf(hit)
+  );
+  const hitText = textOf(hit);
   check(
-    'every structured caveat message appears in the text',
+    "every structured caveat message appears in the text",
     (sc?.caveats ?? []).every((c) => hitText.includes(c.message)),
-  )
+  );
 
-  console.log('\n== structuredContent: miss ==')
-  const miss = await callTool(31, 'resolve-geography-fips', {
-    geography_name: 'Zzyzx Qwertyuiop Nowhere',
-  })
-  const mc = miss?.structuredContent
-  check('structuredContent present on a miss', !!mc)
+  console.log("\n== structuredContent: miss ==");
+  const miss = await callTool(31, "resolve-geography-fips", {
+    geography_name: "Zzyzx Qwertyuiop Nowhere",
+  });
+  const mc = miss?.structuredContent;
+  check("structuredContent present on a miss", !!mc);
   check(
-    'miss reports total_count 0 (known zero, not null)',
+    "miss reports total_count 0 (known zero, not null)",
     mc?.total_count === 0,
     String(mc?.total_count),
-  )
+  );
   check(
-    'miss carries a NO_MATCH caveat',
-    (mc?.caveats ?? []).some((c) => c.code === 'NO_MATCH'),
-  )
+    "miss carries a NO_MATCH caveat",
+    (mc?.caveats ?? []).some((c) => c.code === "NO_MATCH"),
+  );
 
-  console.log('\n== structuredContent: search ==')
-  const search = await callTool(32, 'search-data-tables', {
-    label_query: 'housing units',
-    api_endpoint: 'acs/acs5',
+  console.log("\n== structuredContent: search ==");
+  const search = await callTool(32, "search-data-tables", {
+    label_query: "housing units",
+    api_endpoint: "acs/acs5",
     limit: 5,
-  })
-  const sSc = search?.structuredContent
-  check('search structuredContent present', !!sSc)
+  });
+  const sSc = search?.structuredContent;
+  check("search structuredContent present", !!sSc);
   check(
-    'search records carry string table ids',
-    (sSc?.records ?? []).every((r) => typeof r.data_table_id === 'string'),
-  )
+    "search records carry string table ids",
+    (sSc?.records ?? []).every((r) => typeof r.data_table_id === "string"),
+  );
 
-  console.log('\n== structuredContent: aggregate data ==')
-  const agg = await callTool(33, 'fetch-aggregate-data', {
-    dataset: 'acs/acs5',
+  console.log("\n== structuredContent: aggregate data ==");
+  const agg = await callTool(33, "fetch-aggregate-data", {
+    dataset: "acs/acs5",
     year: 2023,
-    get: { variables: ['B25001_001E'] },
-    for: 'county:020',
-    in: 'state:02',
-  })
-  check('aggregate call is not an error', agg && agg.isError !== true, textOf(agg).slice(0, 200))
-  const aSc = agg?.structuredContent
-  check('aggregate structuredContent present', !!aSc)
+    get: { variables: ["B25001_001E"] },
+    for: "county:020",
+    in: "state:02",
+  });
   check(
-    'source carries dataset + vintage + citation_url',
-    typeof aSc?.source?.dataset === 'string' &&
-      typeof aSc?.source?.vintage === 'string' &&
-      typeof aSc?.source?.citation_url === 'string',
-  )
+    "aggregate call is not an error",
+    agg && agg.isError !== true,
+    textOf(agg).slice(0, 200),
+  );
+  const aSc = agg?.structuredContent;
+  check("aggregate structuredContent present", !!aSc);
   check(
-    'citation_url is key-redacted',
-    aSc?.source?.citation_url?.includes('key=REDACTED'),
-  )
-  const record = aSc?.records?.[0]
-  const estimateCell = record?.cells?.find(
-    (c) => c.variable === 'B25001_001E',
-  )
+    "source carries dataset + vintage + citation_url",
+    typeof aSc?.source?.dataset === "string" &&
+      typeof aSc?.source?.vintage === "string" &&
+      typeof aSc?.source?.citation_url === "string",
+  );
   check(
-    'estimate cell carries value AND its MOE together',
+    "citation_url is key-redacted",
+    aSc?.source?.citation_url?.includes("key=REDACTED"),
+  );
+  const record = aSc?.records?.[0];
+  const estimateCell = record?.cells?.find((c) => c.variable === "B25001_001E");
+  check(
+    "estimate cell carries value AND its MOE together",
     estimateCell &&
-      (typeof estimateCell.value === 'number' ||
+      (typeof estimateCell.value === "number" ||
         estimateCell.annotation !== null) &&
-      'moe' in estimateCell,
-  )
+      "moe" in estimateCell,
+  );
   check(
-    'geography FIPS codes are strings',
-    (record?.geography?.codes ?? []).every((c) => typeof c.code === 'string'),
-  )
+    "geography FIPS codes are strings",
+    (record?.geography?.codes ?? []).every((c) => typeof c.code === "string"),
+  );
   check(
-    'no sentinel value appears as a bare number in structured data',
+    "no sentinel value appears as a bare number in structured data",
     sentinelNumbersIn(aSc).length === 0,
     JSON.stringify(sentinelNumbersIn(aSc)),
-  )
+  );
   check(
-    'every aggregate caveat message appears in the text',
+    "every aggregate caveat message appears in the text",
     (aSc?.caveats ?? []).every((c) => textOf(agg).includes(c.message)),
-  )
+  );
 
-  console.log('\n== structuredContent: survey programs/components ==')
-  const programs = await callTool(34, 'list-survey-programs', {})
-  const pSc = programs?.structuredContent
-  check('programs structuredContent present', !!pSc)
+  console.log("\n== structuredContent: survey programs/components ==");
+  const programs = await callTool(34, "list-survey-programs", {});
+  const pSc = programs?.structuredContent;
+  check("programs structuredContent present", !!pSc);
   check(
-    'programs include ACS with a positive table count',
+    "programs include ACS with a positive table count",
     (pSc?.records ?? []).some(
-      (r) => r.program_string === 'ACS' && r.table_count > 0,
+      (r) => r.program_string === "ACS" && r.table_count > 0,
     ),
-  )
-  const components = await callTool(35, 'list-survey-components', {
-    program_string: 'ACS',
-  })
-  const cSc = components?.structuredContent
-  check('components structuredContent present', !!cSc)
+  );
+  const components = await callTool(35, "list-survey-components", {
+    program_string: "ACS",
+  });
+  const cSc = components?.structuredContent;
+  check("components structuredContent present", !!cSc);
   check(
-    'ACS components carry api_endpoint strings (incl. acs/acs5)',
-    (cSc?.records ?? []).some((r) => r.api_endpoint === 'acs/acs5'),
-  )
-  const compMiss = await callTool(36, 'list-survey-components', {
-    program_string: 'XYZZY',
-  })
-  const cmSc = compMiss?.structuredContent
+    "ACS components carry api_endpoint strings (incl. acs/acs5)",
+    (cSc?.records ?? []).some((r) => r.api_endpoint === "acs/acs5"),
+  );
+  const compMiss = await callTool(36, "list-survey-components", {
+    program_string: "XYZZY",
+  });
+  const cmSc = compMiss?.structuredContent;
   check(
-    'components miss reports total_count 0 with NO_MATCH',
+    "components miss reports total_count 0 with NO_MATCH",
     cmSc?.total_count === 0 &&
-      (cmSc?.caveats ?? []).some((c) => c.code === 'NO_MATCH'),
-  )
+      (cmSc?.caveats ?? []).some((c) => c.code === "NO_MATCH"),
+  );
 
-  console.log('\n== structuredContent: table variables ==')
-  const vars = await callTool(37, 'list-table-variables', {
-    dataset: 'acs/acs5',
+  console.log("\n== structuredContent: table variables ==");
+  const vars = await callTool(37, "list-table-variables", {
+    dataset: "acs/acs5",
     year: 2023,
-    table_id: 'B01001',
-  })
-  const vSc = vars?.structuredContent
+    table_id: "B01001",
+  });
+  const vSc = vars?.structuredContent;
   check(
-    'table variables call is not an error',
+    "table variables call is not an error",
     vars && vars.isError !== true,
     textOf(vars).slice(0, 200),
-  )
+  );
   check(
-    'table variables returns estimate codes with labels',
+    "table variables returns estimate codes with labels",
     (vSc?.records ?? []).some(
-      (r) => r.code === 'B01001_001E' && typeof r.label === 'string',
+      (r) => r.code === "B01001_001E" && typeof r.label === "string",
     ),
-  )
+  );
   check(
-    'no margin-of-error or annotation code is listed as a variable',
+    "no margin-of-error or annotation code is listed as a variable",
     (vSc?.records ?? []).length > 0 &&
-      vSc.records.every((r) => r.code.endsWith('E')),
-  )
-  const varsMiss = await callTool(38, 'list-table-variables', {
-    dataset: 'acs/acs5',
+      vSc.records.every((r) => r.code.endsWith("E")),
+  );
+  const varsMiss = await callTool(38, "list-table-variables", {
+    dataset: "acs/acs5",
     year: 2023,
-    table_id: 'B01002X',
-  })
-  check('unknown table is reported as an error', varsMiss?.isError === true)
+    table_id: "B01002X",
+  });
+  check("unknown table is reported as an error", varsMiss?.isError === true);
 
-  console.log('\n== list-datasets filter ==')
-  const oneDataset = await callTool(39, 'list-datasets', {
-    dataset: 'acs/acs5',
-  })
-  const dSc = oneDataset?.structuredContent
+  console.log("\n== list-datasets filter ==");
+  const oneDataset = await callTool(39, "list-datasets", {
+    dataset: "acs/acs5",
+  });
+  const dSc = oneDataset?.structuredContent;
   check(
-    'dataset filter returns exactly acs/acs5 with vintages',
+    "dataset filter returns exactly acs/acs5 with vintages",
     dSc?.total_count === 1 &&
-      dSc.datasets[0]?.dataset === 'acs/acs5' &&
+      dSc.datasets[0]?.dataset === "acs/acs5" &&
       dSc.datasets[0].years.length > 0,
     String(dSc?.total_count),
-  )
+  );
   check(
-    'filtered response is small (under 5 KB)',
+    "filtered response is small (under 5 KB)",
     textOf(oneDataset).length < 5000,
     String(textOf(oneDataset).length),
-  )
+  );
 
-  console.log('\n== invalid arguments ==')
+  console.log("\n== invalid arguments ==");
   const badArgs = await post(
-    rpc(40, 'tools/call', {
-      name: 'fetch-aggregate-data',
-      arguments: { dataset: 'acs/acs5', year: '2023', get: {} },
+    rpc(40, "tools/call", {
+      name: "fetch-aggregate-data",
+      arguments: { dataset: "acs/acs5", year: "2023", get: {} },
     }),
-  )
+  );
   check(
-    'bad arguments return a tool result, not a JSON-RPC error',
+    "bad arguments return a tool result, not a JSON-RPC error",
     badArgs.json?.error === undefined && badArgs.json?.result?.isError === true,
     JSON.stringify(badArgs.json?.error ?? {}),
-  )
+  );
   check(
-    'the error names the offending field in plain text',
-    textOf(badArgs.json?.result).includes('- year: Expected number'),
-  )
+    "the error names the offending field in plain text",
+    textOf(badArgs.json?.result).includes("- year: Expected number"),
+  );
 
-  console.log('\n== key redaction sweep ==')
+  console.log("\n== key redaction sweep ==");
   const everything = JSON.stringify([
     hit,
     miss,
@@ -402,50 +403,190 @@ async function structuredChecks() {
     vars,
     varsMiss,
     oneDataset,
-  ])
+  ]);
   check(
-    'no response contains an unredacted key= parameter',
+    "no response contains an unredacted key= parameter",
     !/key=(?!REDACTED)[A-Za-z0-9]/.test(everything),
-  )
+  );
 }
 
 async function promptsChecks() {
-  console.log('\n== prompts ==')
-  const list = await post(rpc(50, 'prompts/list'))
-  const prompts = list.json?.result?.prompts ?? []
+  console.log("\n== prompts ==");
+  const list = await post(rpc(50, "prompts/list"));
+  const prompts = list.json?.result?.prompts ?? [];
   check(
-    'lists get_population_data and compare_places, each with a title',
-    ['get_population_data', 'compare_places'].every((name) =>
-      prompts.some((p) => p.name === name && typeof p.title === 'string'),
+    "lists get_population_data and compare_places, each with a title",
+    ["get_population_data", "compare_places"].every((name) =>
+      prompts.some((p) => p.name === name && typeof p.title === "string"),
     ),
-    prompts.map((p) => p.name).join(','),
-  )
+    prompts.map((p) => p.name).join(","),
+  );
   const got = await post(
-    rpc(51, 'prompts/get', {
-      name: 'compare_places',
-      arguments: { topic: 'median household income', places: 'Anchorage, Juneau' },
+    rpc(51, "prompts/get", {
+      name: "compare_places",
+      arguments: {
+        topic: "median household income",
+        places: "Anchorage, Juneau",
+      },
     }),
-  )
+  );
   check(
-    'compare_places renders a workflow naming list-table-variables',
-    (got.json?.result?.messages?.[0]?.content?.text ?? '').includes(
-      'list-table-variables',
+    "compare_places renders a workflow naming list-table-variables",
+    (got.json?.result?.messages?.[0]?.content?.text ?? "").includes(
+      "list-table-variables",
     ),
-  )
+  );
+}
+
+// MCP 2026-07-28: stateless requests carrying _meta plus mirrored headers.
+// The server is dual-era, so these run alongside the initialize checks.
+const MODERN = "2026-07-28";
+const MODERN_META = {
+  "io.modelcontextprotocol/protocolVersion": MODERN,
+  "io.modelcontextprotocol/clientInfo": { name: "smoke-prod", version: "1" },
+  "io.modelcontextprotocol/clientCapabilities": {},
+};
+
+async function modern(id, method, params = {}, headers = {}) {
+  const res = await fetch(BASE_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      "MCP-Protocol-Version": MODERN,
+      "Mcp-Method": method,
+      ...(typeof params.name === "string" ? { "Mcp-Name": params.name } : {}),
+      ...headers,
+    },
+    body: JSON.stringify(
+      rpc(id, method, { ...params, _meta: { ...MODERN_META } }),
+    ),
+  });
+  let json = null;
+  try {
+    json = await res.json();
+  } catch {
+    /* empty or non-JSON body */
+  }
+  return { status: res.status, headers: res.headers, json };
+}
+
+async function modernChecks() {
+  console.log("\n== MCP 2026-07-28 (stateless) ==");
+
+  const discover = await modern(60, "server/discover");
+  const d = discover.json?.result ?? {};
+  check(
+    "server/discover -> 200",
+    discover.status === 200,
+    String(discover.status),
+  );
+  check(
+    "discover lists 2026-07-28 in supportedVersions",
+    Array.isArray(d.supportedVersions) && d.supportedVersions.includes(MODERN),
+    JSON.stringify(d.supportedVersions),
+  );
+  check(
+    "discover is resultType complete with ttlMs + cacheScope",
+    d.resultType === "complete" &&
+      typeof d.ttlMs === "number" &&
+      d.cacheScope === "public",
+    JSON.stringify({
+      resultType: d.resultType,
+      ttlMs: d.ttlMs,
+      cacheScope: d.cacheScope,
+    }),
+  );
+  check(
+    "discover reports serverInfo in _meta and instructions",
+    typeof d._meta?.["io.modelcontextprotocol/serverInfo"]?.version ===
+      "string" && typeof d.instructions === "string",
+  );
+
+  const list = await modern(61, "tools/list");
+  check(
+    "modern tools/list returns 8 tools, resultType complete, cacheable",
+    list.json?.result?.tools?.length === 8 &&
+      list.json?.result?.resultType === "complete" &&
+      typeof list.json?.result?.ttlMs === "number",
+    String(list.json?.result?.tools?.length),
+  );
+  check(
+    "modern responses carry no mcp-session-id",
+    list.headers.get("mcp-session-id") === null,
+  );
+
+  const call = await modern(62, "tools/call", {
+    name: "list-datasets",
+    arguments: { dataset: "acs/acs1" },
+  });
+  check(
+    "modern tools/call list-datasets -> resultType complete with structuredContent",
+    call.json?.result?.resultType === "complete" &&
+      call.json?.result?.structuredContent?.total_count === 1,
+    JSON.stringify(call.json?.error ?? call.json?.result?.isError),
+  );
+
+  const mismatch = await modern(
+    63,
+    "tools/call",
+    { name: "list-datasets", arguments: {} },
+    {
+      "Mcp-Name": "fetch-aggregate-data",
+    },
+  );
+  check(
+    "Mcp-Name mismatch -> 400 HeaderMismatch -32020",
+    mismatch.status === 400 && mismatch.json?.error?.code === -32020,
+    `${mismatch.status} ${JSON.stringify(mismatch.json?.error)}`,
+  );
+
+  const res = await fetch(BASE_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "MCP-Protocol-Version": "2099-01-01",
+      "Mcp-Method": "tools/list",
+    },
+    body: JSON.stringify(
+      rpc(64, "tools/list", {
+        _meta: {
+          ...MODERN_META,
+          "io.modelcontextprotocol/protocolVersion": "2099-01-01",
+        },
+      }),
+    ),
+  });
+  const unsupported = await res.json().catch(() => null);
+  check(
+    "unsupported _meta version -> 400 -32022 listing 2026-07-28",
+    res.status === 400 &&
+      unsupported?.error?.code === -32022 &&
+      unsupported?.error?.data?.supported?.includes(MODERN),
+    `${res.status} ${JSON.stringify(unsupported?.error)}`,
+  );
+
+  const ping = await modern(65, "ping");
+  check(
+    "ping is gone in 2026-07-28 -> 404 -32601",
+    ping.status === 404 && ping.json?.error?.code === -32601,
+    `${ping.status} ${JSON.stringify(ping.json?.error)}`,
+  );
 }
 
 async function main() {
-  console.log(`Census MCP smoke test against ${BASE_URL}`)
-  await transportChecks()
-  await initializeChecks()
-  await toolsListChecks()
-  await promptsChecks()
-  await structuredChecks()
-  console.log(`\n${passes} passed, ${failures} failed`)
-  process.exit(failures > 0 ? 1 : 0)
+  console.log(`Census MCP smoke test against ${BASE_URL}`);
+  await transportChecks();
+  await initializeChecks();
+  await modernChecks();
+  await toolsListChecks();
+  await promptsChecks();
+  await structuredChecks();
+  console.log(`\n${passes} passed, ${failures} failed`);
+  process.exit(failures > 0 ? 1 : 0);
 }
 
 main().catch((err) => {
-  console.error('Smoke test crashed:', err)
-  process.exit(1)
-})
+  console.error("Smoke test crashed:", err);
+  process.exit(1);
+});

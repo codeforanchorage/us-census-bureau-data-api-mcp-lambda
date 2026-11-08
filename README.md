@@ -11,6 +11,10 @@ Bringing _official_ Census Bureau statistics to AI assistants everywhere.
 
 The *U.S. Census Bureau Data API MCP* is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) server that connects AI assistants with data from the Census Data API and other official Census Bureau sources. This project is built using the [MCP Typescript SDK](https://github.com/modelcontextprotocol/typescript-sdk).
 
+**Protocol versions (hosted Lambda endpoint):** dual-era.
+- Stateless [2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28) clients get per-request `_meta`, `server/discover` and mirrored-header validation.
+- `initialize`-based clients on 2025-11-25, 2025-06-18, 2025-03-26 and 2024-11-05 keep the session handshake. M365 Copilot GCC uses this path.
+
 ## Contents
 * [Getting Started](#getting-started)
 * [Using the MCP Server](#using-the-mcp-server)
