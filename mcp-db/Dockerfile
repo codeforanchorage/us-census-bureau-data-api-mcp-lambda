@@ -1,5 +1,5 @@
 # Development Environment
-FROM node:20-alpine AS dev
+FROM node:24-alpine AS dev
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --silent
@@ -8,7 +8,7 @@ RUN npm run build
 CMD ["sh", "-c", "npm run migrate:up"]
 
 # Production Environment
-FROM node:20-slim AS prod
+FROM node:24-slim AS prod
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev --silent
