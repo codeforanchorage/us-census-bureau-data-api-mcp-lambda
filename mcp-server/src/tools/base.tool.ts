@@ -32,7 +32,7 @@ export interface MCPTool<Args extends object = object> {
   // clients may validate -- so never declare a constraint real Census
   // data can violate.
   outputSchema?: Tool['inputSchema']
-  argsSchema: z.ZodSchema<Args, z.ZodTypeDef, Args>
+  argsSchema: z.ZodType<Args, Args>
   handler: (args: Args) => Promise<ToolResponse>
 }
 
@@ -42,7 +42,7 @@ interface StoredMCPTool {
   description: string
   inputSchema: Tool['inputSchema']
   outputSchema?: Tool['inputSchema']
-  argsSchema: z.ZodSchema<object, z.ZodTypeDef, object>
+  argsSchema: z.ZodType<object, object>
   handler: (args: object) => Promise<ToolResponse>
 }
 
@@ -52,7 +52,7 @@ export abstract class BaseTool<Args extends object> implements MCPTool<Args> {
   abstract description: string
   abstract inputSchema: Tool['inputSchema']
   outputSchema?: Tool['inputSchema']
-  abstract get argsSchema(): z.ZodType<Args, z.ZodTypeDef, Args>
+  abstract get argsSchema(): z.ZodType<Args, Args>
   protected abstract toolHandler(
     args: Args,
     apiKey?: string,
@@ -126,7 +126,7 @@ export class ToolRegistry {
       description: tool.description,
       inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema,
-      argsSchema: tool.argsSchema as z.ZodSchema<object, z.ZodTypeDef, object>,
+      argsSchema: tool.argsSchema as z.ZodType<object, object>,
       handler: tool.handler as (args: object) => Promise<ToolResponse>,
     }
     this.tools.set(tool.name, storedTool)

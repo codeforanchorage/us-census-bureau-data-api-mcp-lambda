@@ -175,7 +175,19 @@ export function formatZodIssues(err: z.ZodError): string {
   return err.issues
     .map(
       (issue) =>
-        `- ${issue.path.length > 0 ? issue.path.join('.') : '(arguments)'}: ${issue.message}`,
+        `- ${issue.path.length > 0 ? issue.path.join('.') : '(arguments)'}: ${issueMessage(issue)}`,
     )
     .join('\n')
+}
+
+// Zod 4 reworded type errors as "Invalid input: expected X, received Y" and
+// reports a missing field as "...received undefined". Keep the zod 3 wording
+// the models were already reading: "Required" for an absent field and
+// "Expected X, received Y" for a wrong type. Other messages pass through.
+function issueMessage(issue: z.core.$ZodIssue): string {
+  if (issue.code !== 'invalid_type') return issue.message
+  const m = /^Invalid input: (expected .+), received (.+)$/.exec(issue.message)
+  if (!m) return issue.message
+  if (m[2] === 'undefined') return 'Required'
+  return `${m[1].charAt(0).toUpperCase()}${m[1].slice(1)}, received ${m[2]}`
 }
