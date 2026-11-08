@@ -87,6 +87,21 @@ npm run migrate:up
 npm run seed
 ```
 
+#### Refreshing for a new Census release
+
+The datasets seed reads the live catalog, so a new vintage (for example ACS
+2025 1-year) appears in `list-datasets` without any change here. But
+`search-data-tables` only knows a vintage's tables once
+`mcp-db/data/concept.csv` links them. Append the links from the API's own
+`groups.json`, commit the CSV, then re-run the seed above. Every seed is
+insert-or-skip, so re-running it against the live database is safe.
+
+```bash
+cd mcp-db
+node scripts/append-concepts.mjs --missing-acs        # list ACS vintages with no links
+node scripts/append-concepts.mjs ACSDT1Y2025 ACSST1Y2025   # append; re-runs append nothing
+```
+
 The RDS security group allows `0.0.0.0/0:5432` by default so your laptop can
 reach it. If you want to tighten this, edit `terraform/aws/rds.tf` to scope the
 ingress to your IP and re-apply — but remember to re-open it (or run from a
