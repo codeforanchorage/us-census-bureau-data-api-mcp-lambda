@@ -8,7 +8,7 @@ export interface MCPPrompt<Args extends object = object> {
   title?: string
   description: string
   arguments?: Prompt['arguments']
-  argsSchema: z.ZodSchema<Args, z.ZodTypeDef, Args>
+  argsSchema: z.ZodType<Args, Args>
   handler: (args: Args) => Promise<{
     description: string
     messages: Array<{
@@ -23,7 +23,7 @@ interface StoredMCPPrompt {
   title?: string
   description: string
   arguments?: Prompt['arguments']
-  argsSchema: z.ZodSchema<object, z.ZodTypeDef, object>
+  argsSchema: z.ZodType<object, object>
   handler: (args: object) => Promise<{
     description: string
     messages: Array<{
@@ -40,7 +40,7 @@ export abstract class BasePrompt<Args extends object>
   title?: string
   abstract description: string
   abstract arguments?: Prompt['arguments']
-  abstract get argsSchema(): z.ZodType<Args, z.ZodTypeDef, Args>
+  abstract get argsSchema(): z.ZodType<Args, Args>
   abstract handler(args: Args): Promise<{
     description: string
     messages: Array<{
@@ -85,11 +85,7 @@ export class PromptRegistry {
       title: prompt.title,
       description: prompt.description,
       arguments: prompt.arguments,
-      argsSchema: prompt.argsSchema as z.ZodSchema<
-        object,
-        z.ZodTypeDef,
-        object
-      >,
+      argsSchema: prompt.argsSchema as z.ZodType<object, object>,
       handler: async (args: object) => {
         // Always call the handler with the original prompt instance as 'this'
         return await prompt.handler.call(prompt, args as T)

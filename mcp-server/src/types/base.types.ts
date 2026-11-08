@@ -31,6 +31,6 @@ export interface StoredMCPTool {
   name: string
   description: string
   inputSchema: Tool['inputSchema']
-  argsSchema: z.ZodSchema<object, z.ZodTypeDef, object>
+  argsSchema: z.ZodType<object, object>
   handler: (args: object) => Promise<ToolResponse>
 }

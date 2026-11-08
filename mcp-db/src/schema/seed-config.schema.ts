@@ -18,15 +18,15 @@ export const BaseSeedConfigSchema = z.object({
 
 // Extend the BaseSeedConfigSchema for Geographies
 export const GeographySeedConfigSchema = BaseSeedConfigSchema.extend({
-  url: z.any(), // Actual validation for function below
+  url: z.any().optional(), // Actual validation for function below
 
   // Custom logic for pre and post processing data
-  beforeSeed: z.any(),
-  afterSeed: z.any(),
+  beforeSeed: z.any().optional(),
+  afterSeed: z.any().optional(),
 }).strict()
 
 const MultiStateGeographySeedConfigSchema = GeographySeedConfigSchema.extend({
-  urlGenerator: z.any(), // Function validation handled in TypeScript
+  urlGenerator: z.any().optional(), // Function validation handled in TypeScript
   requiresStateIteration: z.literal(true),
 })
 

@@ -28,7 +28,7 @@ interface SummaryLevelRow extends SummaryLevel {
   updated_at: Date
 }
 
-describe.sequential('Summary Levels Config', () => {
+describe('Summary Levels Config', () => {
   let runner: SeedRunner
   let client: Client
   let databaseUrl: string

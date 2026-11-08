@@ -101,12 +101,12 @@ export const predicatesSchema = z
     for (const key of Object.keys(predicates)) {
       if (RESERVED_PREDICATE_KEYS.has(key.toLowerCase())) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: `"${key}" is a reserved query parameter and cannot be passed via predicates; use the dedicated argument instead.`,
         })
       } else if (!/^[A-Za-z0-9_]+$/.test(key)) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: `Invalid predicate key "${key}": only letters, digits, and underscores are allowed.`,
         })
       }

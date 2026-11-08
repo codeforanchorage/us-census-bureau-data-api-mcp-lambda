@@ -12,7 +12,7 @@ export class MockToolRegistry {
       name: tool.name,
       description: tool.description,
       inputSchema: tool.inputSchema,
-      argsSchema: tool.argsSchema as z.ZodSchema<object, z.ZodTypeDef, object>,
+      argsSchema: tool.argsSchema as z.ZodType<object, object>,
       handler: tool.handler as (
         args: object,
       ) => Promise<{ content: ToolContent[] }>,

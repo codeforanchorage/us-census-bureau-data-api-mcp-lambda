@@ -1,4 +1,3 @@
-import { z } from 'zod'
 import type { RefinementCtx } from 'zod'
 
 type Dataset = {
@@ -49,13 +48,13 @@ export function validateGeographyArgs(args: TableArgs, ctx: RefinementCtx) {
   if (!args.for && !args.ucgid) {
     ctx.addIssue({
       path: ['for', 'ucgid'],
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       message: 'No geography specified error - define for or ucgid arguments.',
     })
   } else if (args.for && args.ucgid) {
     ctx.addIssue({
       path: ['for', 'ucgid'],
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       message:
         'Too many geographies specified error - define for or ucgid only, not both.',
     })

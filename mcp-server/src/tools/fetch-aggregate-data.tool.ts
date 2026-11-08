@@ -1,5 +1,4 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js'
-import { z } from 'zod'
 
 import { BaseTool } from './base.tool.js'
 import { fetchWithTimeout, redactApiKey } from '../helpers/http.js'
@@ -50,7 +49,7 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
       if (identifiedDataset.tool !== this.name) {
         ctx.addIssue({
           path: ['dataset'],
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: identifiedDataset.message,
         })
       }
