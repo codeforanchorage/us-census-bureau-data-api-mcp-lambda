@@ -1,4 +1,4 @@
-FROM node:22.12-alpine AS builder
+FROM node:24.22-alpine AS builder
 
 WORKDIR /app
 
@@ -21,7 +21,7 @@ RUN npm run build
 RUN echo "=== Build output ===" && ls -la dist/ || echo "No dist directory"
 RUN echo "=== All dist files ===" && find dist -type f || echo "No files in dist"
 
-FROM node:22.12-alpine AS release
+FROM node:24.22-alpine AS release
 
 WORKDIR /app
 
