@@ -293,6 +293,43 @@ async function structuredChecks() {
     sentinelNumbersIn(aSc).length === 0,
     JSON.stringify(sentinelNumbersIn(aSc)),
   );
+
+  console.log("\n== ACS product selection (product: auto) ==");
+  // Juneau (~32k people) has no ACS 1-year estimate, so auto must answer
+  // from 5-year and say so. Asserts the product, never the figure.
+  const small = await callTool(36, "fetch-aggregate-data", {
+    dataset: "acs/acs1",
+    product: "auto",
+    year: 2023,
+    get: { variables: ["B01003_001E"] },
+    for: "place:36400",
+    in: "state:02",
+  });
+  const autoSc = small?.structuredContent;
+  check(
+    "auto on a place under 65,000 falls back to acs/acs5",
+    small?.isError !== true && autoSc?.source?.dataset === "acs/acs5",
+    textOf(small).slice(0, 200),
+  );
+  check(
+    "... and leads with the PRODUCT_SELECTED caveat",
+    autoSc?.caveats?.[0]?.code === "PRODUCT_SELECTED" &&
+      autoSc?.query?.product === "auto",
+    JSON.stringify(autoSc?.caveats?.[0]),
+  );
+  const multi = await callTool(37, "fetch-aggregate-data", {
+    dataset: "acs/acs1",
+    product: "auto",
+    year: 2023,
+    get: { variables: ["B01003_001E"] },
+    for: "county:*",
+    in: "state:02",
+  });
+  check(
+    "auto on several geographies uses acs/acs5 (1-year would drop small ones)",
+    multi?.structuredContent?.source?.dataset === "acs/acs5",
+    textOf(multi).slice(0, 200),
+  );
   check(
     "every aggregate caveat message appears in the text",
     (aSc?.caveats ?? []).every((c) => textOf(agg).includes(c.message)),

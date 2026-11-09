@@ -20,14 +20,23 @@ import {
   TableArgs,
   TableSchema,
 } from '../schema/fetch-aggregate-data.schema.js'
-import { ToolResponse } from '../types/base.types.js'
+import { ToolCaveat, ToolResponse } from '../types/base.types.js'
+import {
+  AcsProduct,
+  acs1Unpublished,
+  acsDataset,
+  acsFamily,
+  fiveYearPeriod,
+  forLevel,
+  isSingleGeography,
+} from '../helpers/acs-product.js'
 
 import {
   datasetValidator,
   validateGeographyArgs,
 } from '../schema/validators.js'
 
-export const toolDescription = `Fetches Census statistics for a dataset, vintage, and geography. Never guess cell codes -- find the table with search-data-tables and its codes with list-table-variables, or fetch the whole table with get.group. ACS estimates are auto-paired with their margin of error and flagged LOW RELIABILITY above CV 30%; suppression sentinels are decoded to text. MOE pairing doubles the variable count against the Census 50-variable cap, so pass at most 25 variables per call for ACS datasets (group requests are exempt). ACS 1-year (acs/acs1) only covers areas of 65,000+ people; use acs/acs5 for smaller geographies. Responses show at most 100 records -- truncation is display-side, the full result is still fetched upstream -- so narrow wildcard geographies; unbounded national wildcards for high-cardinality levels (e.g. for=county:* with no in=) are rejected. Required: dataset, year, get (variables or group), and one of for/ucgid.`
+export const toolDescription = `Fetches Census statistics for a dataset, vintage, and geography. Never guess cell codes -- find the table with search-data-tables and its codes with list-table-variables, or fetch the whole table with get.group. ACS estimates are auto-paired with their margin of error and flagged LOW RELIABILITY above CV 30%; suppression sentinels are decoded to text. MOE pairing doubles the variable count against the Census 50-variable cap, so pass at most 25 variables per call for ACS datasets (group requests are exempt). ACS 1-year (acs/acs1) only covers areas of 65,000+ people; use acs/acs5 for smaller geographies, or pass product="auto" to have the tool choose (the PRODUCT_SELECTED caveat says which and why). Responses show at most 100 records -- truncation is display-side, the full result is still fetched upstream -- so narrow wildcard geographies; unbounded national wildcards for high-cardinality levels (e.g. for=county:* with no in=) are rejected. Required: dataset, year, get (variables or group), and one of for/ucgid.`
 
 // Census Data API hard limit on explicit get= variables per request.
 const CENSUS_VARIABLE_LIMIT = 50
@@ -73,13 +82,140 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
   }
 
   async toolHandler(args: TableArgs, apiKey: string): Promise<ToolResponse> {
+    if (!args.product) {
+      return (await this.runQuery(args, apiKey)).response
+    }
+
+    const family = acsFamily(args.dataset)
+    if (!family) {
+      return this.createErrorResponse(
+        `product="${args.product}" only applies to ACS datasets published as both 1-year and ` +
+          `5-year: acs/acs1 or acs/acs5, optionally with /subject, /profile or /cprofile. ` +
+          `"${args.dataset}" is not one of them -- omit product to query it as given.`,
+      )
+    }
+
+    if (args.product !== 'auto') {
+      return this.forced(args, apiKey, args.product, family.suffix)
+    }
+    return this.auto(args, apiKey, family.suffix)
+  }
+
+  // product: "1-year" / "5-year" -- the caller chose; just honour it.
+  private async forced(
+    args: TableArgs,
+    apiKey: string,
+    product: Exclude<AcsProduct, 'auto'>,
+    suffix: string,
+  ): Promise<ToolResponse> {
+    const dataset = acsDataset(product, suffix)
+    const caveat = productCaveat(
+      `ACS ${product} (${dataset}) used, as requested with product="${product}".` +
+        (product === '5-year'
+          ? ` Vintage ${args.year} covers ${fiveYearPeriod(args.year)}, not a single year.`
+          : ''),
+    )
+    return (await this.runQuery({ ...args, dataset }, apiKey, [caveat]))
+      .response
+  }
+
+  // product: "auto". One geography: 1-year when published there, else
+  // 5-year. Several geographies: always 5-year, because acs1 silently
+  // omits the areas under 65,000 people from a multi-area result and
+  // mixing products would not be comparable anyway.
+  private async auto(
+    args: TableArgs,
+    apiKey: string,
+    suffix: string,
+  ): Promise<ToolResponse> {
+    const acs1 = acsDataset('1-year', suffix)
+
+    if (!isSingleGeography(args)) {
+      return this.fiveYear(
+        args,
+        apiKey,
+        suffix,
+        'this request covers several geographies, so ACS 5-year is used for all of them: ' +
+          'ACS 1-year omits every area under 65,000 people from a multi-area result (silently), ' +
+          'and 1-year and 5-year figures should not be compared side by side.',
+      )
+    }
+    if (acs1Unpublished(args.for)) {
+      return this.fiveYear(
+        args,
+        apiKey,
+        suffix,
+        `ACS 1-year is never published for ${forLevel(args.for)} geographies.`,
+      )
+    }
+
+    const oneYear = await this.runQuery({ ...args, dataset: acs1 }, apiKey, [
+      productCaveat(
+        `ACS 1-year ${args.year} (${acs1}) used: this geography has 65,000+ people, so the ` +
+          `Census Bureau publishes a 1-year estimate for it. It is the most current figure; ` +
+          `pass product="5-year" for the 5-year estimate, which has a smaller margin of error but describes a five-year period.`,
+      ),
+    ])
+    const reason: Partial<Record<QueryStatus, string>> = {
+      no_data:
+        'no ACS 1-year estimate is published for this geography -- 1-year covers only areas of 65,000+ people.',
+      not_found: `ACS 1-year ${args.year} is not published (there was no standard 1-year release for 2020).`,
+      bad_request:
+        'the ACS 1-year API does not publish this geography (1-year covers only areas of 65,000+ people).',
+    }
+    const why = reason[oneYear.status]
+    if (!why) return oneYear.response // ok, or a failure 5-year would not fix
+    return this.fiveYear(args, apiKey, suffix, why)
+  }
+
+  // 5-year for the requested vintage; if that vintage is not out yet (the
+  // 5-year release trails the 1-year by about three months), the latest
+  // published one.
+  private async fiveYear(
+    args: TableArgs,
+    apiKey: string,
+    suffix: string,
+    why: string,
+  ): Promise<ToolResponse> {
+    const dataset = acsDataset('5-year', suffix)
+    const caveatFor = (year: number, extra = '') =>
+      productCaveat(
+        `ACS 5-year ${year} (${dataset}) used: ${why}${extra} This vintage covers ` +
+          `${fiveYearPeriod(year)}; report it as a five-year period estimate, not a single year.`,
+      )
+
+    const same = await this.runQuery({ ...args, dataset }, apiKey, [
+      caveatFor(args.year),
+    ])
+    if (same.status !== 'not_found') return same.response
+
+    const previous = args.year - 1
+    return (
+      await this.runQuery({ ...args, dataset, year: previous }, apiKey, [
+        caveatFor(
+          previous,
+          ` ACS 5-year ${args.year} is not published yet, so the latest 5-year vintage is used.`,
+        ),
+      ])
+    ).response
+  }
+
+  private fail(status: QueryStatus, message: string): QueryOutcome {
+    return { status, response: this.createErrorResponse(message) }
+  }
+
+  private async runQuery(
+    args: TableArgs,
+    apiKey: string,
+    leadCaveats: ToolCaveat[] = [],
+  ): Promise<QueryOutcome> {
     // Reject unbounded national wildcards before paying for anything. The
     // 100-record cap is display-side only -- the full payload is still
     // fetched from the Census API -- so a nationwide county:*/tract:* call
     // pays full upstream cost for a result that is mostly cut away.
     const wildcardError = checkUnboundedWildcard(args.for, args.in)
     if (wildcardError) {
-      return this.createErrorResponse(wildcardError)
+      return this.fail('invalid', wildcardError)
     }
 
     const baseUrl = `https://api.census.gov/data/${args.year}/${args.dataset}`
@@ -112,7 +248,8 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
             return `  - ${v}${hint}`
           })
           .join('\n')
-        return this.createErrorResponse(
+        return this.fail(
+          'invalid',
           `Unknown cell code(s) for ${args.dataset} ${args.year}:\n${hints}\n\n` +
             `Use list-table-variables (or search-data-tables to find the table first) to get the correct codes before calling fetch-aggregate-data.`,
         )
@@ -128,7 +265,8 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
           suggestions.length > 0
             ? ` -- did you mean ${suggestions.join(', ')}?`
             : ''
-        return this.createErrorResponse(
+        return this.fail(
+          'invalid',
           `Unknown group code "${requestedGroup}" for ${args.dataset} ${args.year}${hint}\n\n` +
             `Use search-data-tables to discover the correct table ID before calling fetch-aggregate-data.`,
         )
@@ -159,7 +297,8 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
     // accurate message; otherwise Census returns an opaque 400 that reads
     // as a geography/cell-code problem when neither is at fault.
     if (effectiveVariables.length > CENSUS_VARIABLE_LIMIT) {
-      return this.createErrorResponse(
+      return this.fail(
+        'invalid',
         `Too many variables: ${requestedVariables.length} requested, and MOE auto-pairing added ` +
           `${autoAddedMoeFields.length} margin-of-error field(s), for an effective total of ` +
           `${effectiveVariables.length} -- over the Census API limit of ${CENSUS_VARIABLE_LIMIT} variables per call. ` +
@@ -231,7 +370,8 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
         console.log(`URL Attempted: ${redactApiKey(url)}`)
 
         if (!res.ok) {
-          return this.createErrorResponse(
+          return this.fail(
+            httpStatus(res.status),
             buildApiErrorMessage(res.status, res.statusText, {
               dataset: args.dataset,
               year: args.year,
@@ -250,7 +390,8 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
         // (or occasionally a 200 with an empty body) rather than an empty array.
         const bodyText = await res.text()
         if (res.status === 204 || bodyText.trim() === '') {
-          return this.createErrorResponse(
+          return this.fail(
+            'no_data',
             `The Census API returned no data for this query (HTTP ${res.status} with an empty body). ` +
               `The query was accepted but matched nothing. Re-verify the geography (for/in/ucgid) via ` +
               `resolve-geography-fips and that the variables are published for ${args.dataset} ${args.year} ` +
@@ -261,13 +402,15 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
         try {
           data = JSON.parse(bodyText) as string[][]
         } catch {
-          return this.createErrorResponse(
+          return this.fail(
+            'upstream_error',
             `The Census API returned a non-JSON response body. Retry after a short delay; ` +
               `if the failure persists the Census Data API may be having an outage.`,
           )
         }
         if (!Array.isArray(data) || data.length === 0) {
-          return this.createErrorResponse(
+          return this.fail(
+            'no_data',
             `The Census API returned an empty result set for this query. Re-verify the geography ` +
               `(for/in/ucgid) via resolve-geography-fips and the variables via search-data-tables.`,
           )
@@ -310,18 +453,50 @@ export class FetchAggregateDataTool extends BaseTool<TableArgs> {
           in: args.in ?? null,
           ucgid: args.ucgid ?? null,
           predicates: args.predicates ?? null,
+          product: args.product ?? null,
         },
         requestedVariables,
         autoAddedMoeFields,
         variablesIndex: variablesIndex as VariablesIndex | null,
         currentYear: new Date().getUTCFullYear(),
+        leadCaveats,
       })
 
-      return this.createSuccessResponse(formatted.text, formatted.structured)
+      return {
+        status: 'ok',
+        response: this.createSuccessResponse(
+          formatted.text,
+          formatted.structured,
+        ),
+      }
     } catch (err) {
-      return this.createErrorResponse(`Fetch failed: ${(err as Error).message}`)
+      return this.fail(
+        'upstream_error',
+        `Fetch failed: ${(err as Error).message}`,
+      )
     }
   }
+}
+
+// How a single query ended, so product:"auto" can tell "1-year is not
+// published here" (fall back to 5-year) from genuine failures (return them).
+type QueryStatus =
+  | 'ok'
+  | 'invalid'
+  | 'no_data'
+  | 'not_found'
+  | 'bad_request'
+  | 'upstream_error'
+type QueryOutcome = { status: QueryStatus; response: ToolResponse }
+
+function httpStatus(status: number): QueryStatus {
+  if (status === 404) return 'not_found'
+  if (status === 400) return 'bad_request'
+  return 'upstream_error'
+}
+
+function productCaveat(message: string): ToolCaveat {
+  return { code: 'PRODUCT_SELECTED', message }
 }
 
 // Geography levels whose nationwide wildcard is far larger than the

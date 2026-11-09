@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { ACS_PRODUCTS } from '../helpers/acs-product.js'
+
 import {
   baseFields,
   baseProperties,
@@ -11,10 +13,22 @@ import {
   yearProperty,
 } from './table.schema.js'
 
+export const PRODUCT_DESCRIPTION =
+  'ACS only: which product to use. "auto" picks for you -- one geography gets ACS 1-year when ' +
+  'it is published there (areas of 65,000+ people), otherwise 5-year; several geographies ' +
+  '(wildcards or lists) always get 5-year so no area is silently dropped and all are comparable. ' +
+  '"1-year" / "5-year" force a product. Works with acs/acs1 or acs/acs5 and their /subject, ' +
+  '/profile and /cprofile variants. Omit to use the dataset exactly as given.'
+
 export const TableSchema = {
   type: 'object',
   properties: {
     ...baseProperties,
+    product: {
+      type: 'string',
+      enum: [...ACS_PRODUCTS],
+      description: PRODUCT_DESCRIPTION,
+    },
     ...yearProperty,
     ...getProperties,
     ...geoProperties,
@@ -24,6 +38,7 @@ export const TableSchema = {
 
 export const FetchAggregateDataToolSchema = z.object({
   ...baseFields,
+  product: z.enum(['auto', '1-year', '5-year']).optional(),
   ...yearField,
   ...getFields,
   ...geoFields,
@@ -56,6 +71,11 @@ export const FetchAggregateDataOutputSchema = {
         in: { type: ['string', 'null'] },
         ucgid: { type: ['string', 'null'] },
         predicates: { type: ['object', 'null'] },
+        product: {
+          type: ['string', 'null'],
+          description:
+            'The product argument as passed (auto, 1-year, 5-year), or null. When set, dataset and year above are the ones actually queried; the PRODUCT_SELECTED caveat says why.',
+        },
       },
       required: ['dataset', 'year', 'get', 'for', 'in', 'ucgid', 'predicates'],
     },
@@ -104,7 +124,7 @@ export const FetchAggregateDataOutputSchema = {
           moe_variable: {
             type: ['string', 'null'],
             description:
-              'The margin-of-error companion merged into this variable\'s cells, when one exists.',
+              "The margin-of-error companion merged into this variable's cells, when one exists.",
           },
         },
         required: ['name', 'label', 'moe_variable'],
