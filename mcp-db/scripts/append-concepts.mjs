@@ -109,10 +109,10 @@ for (const id of ids) {
     `https://api.census.gov/data/${endpoint}/groups.json`,
   )
   const rows = groups
-    .filter((g) => g.name && g.description)
+    .filter((g) => g.name && g.description?.trim())
     .filter((g) => !pairs.has(`${g.name}|${id}`))
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map((g) => ['', g.description, g.name, id].map(csvQuote).join(','))
+    .map((g) => ['', g.description.trim(), g.name, id].map(csvQuote).join(','))
   if (!dryRun && rows.length) appendFileSync(CSV, rows.join('\r\n') + '\r\n')
   rows.forEach((r) => pairs.add(r))
   total += rows.length
