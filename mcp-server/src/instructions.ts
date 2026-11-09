@@ -15,7 +15,8 @@ Unsure which survey fits? Use list-survey-programs -> list-survey-components fir
 
 Choosing a dataset:
 - acs/acs5 (5-year ACS) covers every geography down to tract and block group. Use it for anything smaller than a large city or county.
-- acs/acs1 (1-year ACS) is more current but only covers areas of 65,000+ people. A 400 error on a small place usually means use acs5.
+- acs/acs1 (1-year ACS) is more current but only covers areas of 65,000+ people.
+- Unsure which ACS product fits? Pass product="auto" to fetch-aggregate-data: one geography gets 1-year when it is published there, otherwise 5-year; several geographies always get 5-year. The ACS PRODUCT caveat says which was used and why -- report the product and period it names.
 - Use the latest published vintage unless the user asks for a specific year; list-datasets(dataset="acs/acs5") shows which vintages exist.
 - The decennial census (dec/*) gives full counts, not estimates, but only every ten years.
 

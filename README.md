@@ -289,6 +289,12 @@ The `fetch-dataset-geography` tool is used for fetching available geography leve
 ### Fetch Aggregate Data
 The `fetch-aggregate-data` tool is used for fetching  aggregate data from the Census Bureau's API. It accepts the following arguments:
 * Dataset (Required) - The identifier of the dataset, e.g. `'acs/acs1'`
+* Product (Optional, ACS only) - `auto`, `1-year` or `5-year`. With `auto`:
+  * one geography gets ACS 1-year when it is published there (areas of 65,000+ people), and 5-year otherwise;
+  * several geographies (wildcards or lists) always get 5-year, because 1-year silently drops the small areas and the two products are not comparable;
+  * if the requested 5-year vintage is not out yet, the latest one is used.
+
+  A leading `PRODUCT_SELECTED` caveat says which product was used and why. This works with `acs/acs1` or `acs/acs5` and their `/subject`, `/profile` and `/cprofile` variants. Omit it to query the dataset exactly as given.
 * Year (Required) - The vintage of the dataset, e.g. `1987`
 * Get (Required) - An object that is required that accepts 2 optional arguments:
 	* Variables (optional) - An array of variables for filtering responses by attributes and rows, e.g. `'NAME'`, `'B01001_001E'`

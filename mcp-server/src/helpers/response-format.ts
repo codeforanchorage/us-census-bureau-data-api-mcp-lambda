@@ -49,6 +49,10 @@ export interface FormatInput {
   autoAddedMoeFields: string[]
   variablesIndex: VariablesIndex | null
   currentYear: number
+  // Caveats decided before the fetch (e.g. PRODUCT_SELECTED: which ACS
+  // product product:"auto" chose and why). They lead the caveat list,
+  // because every number below depends on which product it came from.
+  leadCaveats?: ToolCaveat[]
   // Threshold for CV-based LOW RELIABILITY flag. 0.30 is the standard
   // "use with caution" line.
   cvFlagThreshold?: number
@@ -99,6 +103,7 @@ const CAVEAT_LABELS: Record<string, string> = {
   SUPPRESSED_VALUES: 'SUPPRESSED VALUES',
   STALE_VINTAGE: 'DATA FRESHNESS',
   MOE_AUTO_PAIRED: 'MOE AUTO-PAIRED',
+  PRODUCT_SELECTED: 'ACS PRODUCT',
 }
 
 function renderCaveat(caveat: ToolCaveat): string {
@@ -141,9 +146,9 @@ export function formatAggregateResponse(
     compact: visibleRows.length > compactThreshold,
   })
 
-  const caveats: ToolCaveat[] = []
+  const caveats: ToolCaveat[] = [...(input.leadCaveats ?? [])]
 
-  // Truncation first -- every downstream claim depends on knowing the
+  // Truncation next -- every downstream claim depends on knowing the
   // response is partial. Reliability flags below cover shown records only.
   if (truncated) {
     caveats.push({
