@@ -27,6 +27,12 @@ vi.mock('../src/tools/fetch-aggregate-data.tool.js', () => ({
   }),
 }))
 
+vi.mock('../src/tools/get-indicator.tool.js', () => ({
+  GetIndicatorTool: vi.fn().mockImplementation(function () {
+    return { name: 'get-indicator' }
+  }),
+}))
+
 vi.mock('../src/prompts/compare-places.prompt.js', () => ({
   ComparePlacesPrompt: vi.fn().mockImplementation(function () {
     return { name: 'compare-places-prompt' }
@@ -92,10 +98,13 @@ describe('main', () => {
       name: 'compare-places-prompt',
     })
 
-    expect(toolRegistrySpy).toHaveBeenCalledTimes(8)
+    expect(toolRegistrySpy).toHaveBeenCalledTimes(9)
 
     expect(toolRegistrySpy).toHaveBeenCalledWith({
       name: 'fetch-aggregate-data',
+    })
+    expect(toolRegistrySpy).toHaveBeenCalledWith({
+      name: 'get-indicator',
     })
 
     expect(toolRegistrySpy).toHaveBeenCalledWith({

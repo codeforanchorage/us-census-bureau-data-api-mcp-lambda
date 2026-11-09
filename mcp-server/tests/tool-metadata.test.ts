@@ -21,6 +21,7 @@ import { createServer } from '../src/createServer'
 const EXPECTED_TITLES: Record<string, string> = {
   'fetch-aggregate-data': 'Fetch Aggregate Data',
   'fetch-dataset-geography': 'Fetch Dataset Geography',
+  'get-indicator': 'Get Indicator',
   'list-datasets': 'List Datasets',
   'list-survey-components': 'List Survey Components',
   'list-survey-programs': 'List Survey Programs',

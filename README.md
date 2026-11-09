@@ -305,6 +305,15 @@ The `fetch-aggregate-data` tool is used for fetching  aggregate data from the Ce
 * Predicates (Optional) - Filter options for the dataset, e.g. `'for': 'state*'`
 * Descriptive (Optional) - Adds variable labels to API response (default: `false`), e.g. `true`
 
+### Get Indicator
+The `get-indicator` tool is a shortcut for headline statistics: one call returns the indicator for a geography, with its margin of error, reliability flag and citation. Indicators: `population`, `median_age`, `median_household_income`, `per_capita_income`, `poverty_rate`, `unemployment_rate` (ACS), `bachelors_or_higher`, `uninsured_rate`, `mean_commute_minutes`, `median_gross_rent`, `median_home_value`, `owner_occupied_share`, `median_housing_cost`, and `decennial_population` (the 2020 count). It accepts the following arguments:
+* Indicator (Required) - one of the names above
+* For / In / UCGID - the geography, as for `fetch-aggregate-data`. Get these from `resolve-geography-fips`. A wildcard or list compares several places on one vintage.
+* Year (Optional) - defaults to the latest published vintage
+* Product (Optional) - `auto` (default), `1-year` or `5-year`; see Fetch Aggregate Data
+
+Each indicator is a single published Census cell, so the value and margin of error are the Bureau's own. Some subject- and profile-table cell codes mean different statistics in older vintages (for example, `S1501_C02_015E` is the *male* bachelor's-or-higher share in 2010-2014). So the tool checks each cell's published label for the vintage it actually queried, and refuses rather than serving the wrong statistic.
+
 ### Resolve Geography FIPS Tool
 The `resolve-geography-fips` tool is used to search across all Census Bureau geographies to return a list of potential matches and the correct FIPS codes and parameters used to query data in them. This tool accepts the following arguments:
 * Geography Name (Required) - The name of the geography to search, e.g. `Philadelphia`

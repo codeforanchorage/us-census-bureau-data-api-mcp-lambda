@@ -160,7 +160,7 @@ async function toolsListChecks() {
   console.log("\n== tools/list ==");
   const list = await post(rpc(20, "tools/list"));
   const tools = list.json?.result?.tools ?? [];
-  check("lists 8 tools", tools.length === 8, String(tools.length));
+  check("lists 9 tools", tools.length === 9, String(tools.length));
   check(
     "every tool has a top-level title",
     tools.every((t) => typeof t.title === "string" && t.title.length > 0),
@@ -317,6 +317,36 @@ async function structuredChecks() {
       autoSc?.query?.product === "auto",
     JSON.stringify(autoSc?.caveats?.[0]),
   );
+  console.log("\n== get-indicator ==");
+  const ind = await callTool(38, "get-indicator", {
+    indicator: "median_household_income",
+    for: "county:020",
+    in: "state:02",
+  });
+  const iSc = ind?.structuredContent;
+  check(
+    "get-indicator returns a verified indicator block",
+    ind?.isError !== true &&
+      iSc?.indicator?.id === "median_household_income" &&
+      typeof iSc?.indicator?.published_label === "string",
+    textOf(ind).slice(0, 200),
+  );
+  check(
+    "... with the value and its MOE together",
+    "moe" in (iSc?.records?.[0]?.cells?.[0] ?? {}) &&
+      iSc?.query?.product === "auto",
+  );
+  const poverty = await callTool(39, "get-indicator", {
+    indicator: "poverty_rate",
+    for: "place:36400",
+    in: "state:02",
+  });
+  check(
+    "get-indicator subject-table indicator on a small place answers from acs5/subject",
+    poverty?.structuredContent?.source?.dataset === "acs/acs5/subject",
+    textOf(poverty).slice(0, 200),
+  );
+
   const multi = await callTool(37, "fetch-aggregate-data", {
     dataset: "acs/acs1",
     product: "auto",
@@ -542,8 +572,8 @@ async function modernChecks() {
 
   const list = await modern(61, "tools/list");
   check(
-    "modern tools/list returns 8 tools, resultType complete, cacheable",
-    list.json?.result?.tools?.length === 8 &&
+    "modern tools/list returns 9 tools, resultType complete, cacheable",
+    list.json?.result?.tools?.length === 9 &&
       list.json?.result?.resultType === "complete" &&
       typeof list.json?.result?.ttlMs === "number",
     String(list.json?.result?.tools?.length),
