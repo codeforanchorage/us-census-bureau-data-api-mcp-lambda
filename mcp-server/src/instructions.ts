@@ -6,6 +6,8 @@
 // Copilot (GCC) render path occasionally drops non-ASCII characters.
 export const SERVER_INSTRUCTIONS = `You are connected to the U.S. Census Bureau Data API. Answer questions about U.S. population, demographic, housing, and economic statistics with these tools, and do not state Census figures from memory.
 
+Shortcut for headline statistics: resolve-geography-fips -> get-indicator(indicator, for/in). It covers population, median age, household and per capita income, poverty, unemployment, bachelor's or higher, uninsured, commute, rent, home value, owner-occupied share, housing cost, and the 2020 count -- with the ACS product and the latest year chosen for you. Use the full workflow below for anything else.
+
 Workflow -- never guess FIPS codes, dataset IDs, or cell codes:
 1. resolve-geography-fips("Anchorage", optional summary_level) -> the for/in strings for the place.
 2. search-data-tables("median household income", api_endpoint="acs/acs5") -> the table_id.
