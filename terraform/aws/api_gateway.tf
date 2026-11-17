@@ -107,29 +107,6 @@ resource "aws_api_gateway_deployment" "mcp_deployment" {
   ]
 }
 
-# API Gateway needs an account-level role to write logs to CloudWatch.
-# This is a per-region, per-account setting.
-
-resource "aws_iam_role" "api_gateway_cloudwatch" {
-  name = "${local.lambda_name}-apigw-cloudwatch"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = {
-        Service = "apigateway.amazonaws.com"
-      }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "api_gateway_cloudwatch" {
-  role       = aws_iam_role.api_gateway_cloudwatch.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
-}
-
 # aws_api_gateway_account is intentionally NOT declared here.
 #
 # It is an ACCOUNT+REGION-LEVEL SINGLETON -- AWS stores exactly one CloudWatch
@@ -141,9 +118,10 @@ resource "aws_iam_role_policy_attachment" "api_gateway_cloudwatch" {
 # off ONE MCP's IAM role, so deleting that role would have broken logging for
 # every MCP -- including the log groups the mcp-stats dashboard reads.
 #
-# The aws_iam_role.api_gateway_cloudwatch above is no longer referenced by this
-# stack. It is left in place deliberately: removing it would destroy an IAM role
-# as a side effect of this refactor, and keeping it makes reverting trivial.
+# This stack used to carry its own role for that singleton
+# (<lambda_name>-apigw-cloudwatch). It was kept for a while after the move so
+# the refactor could be reverted, and has since been removed: nothing
+# referenced it and it was last used on 2026-07-29.
 resource "aws_cloudwatch_log_group" "api_gateway_access_logs" {
   name              = "/aws/apigateway/${local.lambda_name}-access"
   retention_in_days = 14

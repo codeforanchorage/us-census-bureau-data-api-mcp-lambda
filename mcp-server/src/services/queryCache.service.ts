@@ -31,6 +31,22 @@ export class CacheDuration {
   }
 }
 
+// Pruning. Nothing else removes rows from census_data_cache: entries live for
+// a year and the table only grew. A warm container prunes at most once per
+// PRUNE_INTERVAL_MS, after a write:
+//   1. rows past their expiry are deleted;
+//   2. if what remains holds more than CACHE_MAX_BYTES of response data, the
+//      least recently used rows beyond that budget are deleted.
+// The budget is measured on the stored (compressed) size of the live rows,
+// not on the table's size on disk: deleted rows only free disk after a
+// vacuum, so a disk-size test would stay over the limit and empty the cache.
+export const CACHE_MAX_BYTES = 2 * 1024 * 1024 * 1024
+export const PRUNE_INTERVAL_MS = 60 * 60 * 1000
+
+// A hit refreshes last_accessed at most this often, so the least-recently-
+// used ordering is real without turning every read into a write.
+const TOUCH_INTERVAL = '1 day'
+
 export interface CacheQueryRequest {
   dataset: string
   group: string | null
@@ -42,6 +58,7 @@ export interface CacheQueryRequest {
 export class QueryCacheService {
   private static instance: QueryCacheService
   private dbService: DatabaseService
+  private lastPrunedAt = 0
 
   constructor(dbService?: DatabaseService) {
     this.dbService = dbService || DatabaseService.getInstance()
@@ -61,10 +78,19 @@ export class QueryCacheService {
     const cacheResult = await this.dbService.query<{
       response_data: string[][]
     }>(
-      `SELECT response_data
-         FROM census_data_cache
-         WHERE request_hash = public.generate_cache_hash($1, $2, $3, $4, $5)
-           AND expires_at > NOW()`,
+      `WITH hit AS (
+           SELECT id, response_data, last_accessed
+           FROM census_data_cache
+           WHERE request_hash = public.generate_cache_hash($1, $2, $3, $4, $5)
+             AND expires_at > NOW()
+         ), touch AS (
+           UPDATE census_data_cache c
+           SET last_accessed = NOW()
+           FROM hit
+           WHERE c.id = hit.id
+             AND hit.last_accessed < NOW() - INTERVAL '${TOUCH_INTERVAL}'
+         )
+         SELECT response_data FROM hit`,
       [
         params.dataset,
         params.group,
@@ -125,5 +151,71 @@ export class QueryCacheService {
         duration.toString(),
       ],
     )
+
+    await this.pruneIfDue()
+  }
+
+  /**
+   * Prunes the cache if this container has not done so recently. Never
+   * throws: housekeeping must not fail the query that happened to trigger it.
+   */
+  private async pruneIfDue(): Promise<void> {
+    const now = Date.now()
+    if (now - this.lastPrunedAt < PRUNE_INTERVAL_MS) return
+    this.lastPrunedAt = now
+    try {
+      await this.prune()
+    } catch (err) {
+      console.error(`Cache prune failed: ${(err as Error).message}`)
+    }
+  }
+
+  /**
+   * Deletes expired rows, then the least recently used rows beyond
+   * maxBytes of stored response data. Returns how many rows each step
+   * removed.
+   */
+  async prune(
+    maxBytes = CACHE_MAX_BYTES,
+  ): Promise<{ expired: number; evicted: number }> {
+    const expired = await this.dbService.query<{ id: string }>(
+      `DELETE FROM census_data_cache
+         WHERE expires_at < NOW()
+         RETURNING id`,
+    )
+
+    // Walk the rows from most to least recently used, keeping a running
+    // total of their stored size; everything past the budget goes.
+    // pg_column_size reads the size from the row's TOAST pointer, so the
+    // large response bodies are not loaded to measure them.
+    const evicted = await this.dbService.query<{ id: string }>(
+      `DELETE FROM census_data_cache
+         WHERE id IN (
+           SELECT id
+           FROM (
+             SELECT id,
+                    SUM(pg_column_size(response_data)) OVER (
+                      ORDER BY last_accessed DESC, id DESC
+                    ) AS running_bytes
+             FROM census_data_cache
+           ) ranked
+           WHERE running_bytes > $1
+         )
+         RETURNING id`,
+      [maxBytes],
+    )
+
+    const result = {
+      expired: expired.rows.length,
+      evicted: evicted.rows.length,
+    }
+    if (result.expired > 0 || result.evicted > 0) {
+      // console.error so it survives the DEBUG_LOGS suppression: an
+      // eviction means the cache has reached its budget, worth seeing.
+      console.error(
+        `Cache pruned: ${result.expired} expired, ${result.evicted} evicted over the ${maxBytes}-byte budget`,
+      )
+    }
+    return result
   }
 }
