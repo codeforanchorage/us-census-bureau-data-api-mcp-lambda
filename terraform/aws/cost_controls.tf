@@ -142,3 +142,84 @@ resource "aws_cloudwatch_metric_alarm" "rds_cpu_credits" {
   alarm_actions = [aws_sns_topic.alerts[0].arn]
   ok_actions    = [aws_sns_topic.alerts[0].arn]
 }
+
+# ── Health alarms ────────────────────────────────────────────────────────────
+# The alarms above watch for a surprise bill. These watch for the service
+# being broken. Tool-level failures (a bad cell code, a Census 4xx) come back
+# as ordinary 200 responses and trip none of them.
+
+# The function itself is failing: an unhandled exception, a timeout, or an
+# out-of-memory kill. Two bad 5-minute windows out of three, so one stray
+# timeout does not page.
+resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
+  count = local.alerts_enabled ? 1 : 0
+
+  alarm_name          = "${local.lambda_name}-lambda-errors"
+  alarm_description   = "Lambda invocations are failing (unhandled error, timeout or out-of-memory) -- callers are getting 5xx responses."
+  namespace           = "AWS/Lambda"
+  metric_name         = "Errors"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    FunctionName = aws_lambda_function.mcp_server.function_name
+  }
+
+  alarm_actions = [aws_sns_topic.alerts[0].arn]
+  ok_actions    = [aws_sns_topic.alerts[0].arn]
+}
+
+# The endpoint is returning server errors, whatever the cause: the Lambda
+# (failed cold start, timeout), the integration, or API Gateway itself.
+resource "aws_cloudwatch_metric_alarm" "api_5xx" {
+  count = local.alerts_enabled ? 1 : 0
+
+  alarm_name          = "${local.lambda_name}-api-5xx"
+  alarm_description   = "API Gateway returned 5 or more 5xx responses in 5 minutes -- the endpoint is failing for callers."
+  namespace           = "AWS/ApiGateway"
+  metric_name         = "5XXError"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 5
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    ApiName = aws_api_gateway_rest_api.mcp_api.name
+    Stage   = var.stage_name
+  }
+
+  alarm_actions = [aws_sns_topic.alerts[0].arn]
+  ok_actions    = [aws_sns_topic.alerts[0].arn]
+}
+
+# The disk is filling. Storage does not autoscale (max_allocated_storage
+# equals allocated_storage), and the response cache keeps each row for a year
+# with nothing pruning it, so this is the warning before writes start failing.
+resource "aws_cloudwatch_metric_alarm" "rds_free_storage" {
+  count = local.alerts_enabled ? 1 : 0
+
+  alarm_name          = "${local.lambda_name}-rds-free-storage"
+  alarm_description   = "RDS free storage is below 20% of the allocated ${var.db_allocated_storage} GB -- prune census_data_cache or raise db_allocated_storage."
+  namespace           = "AWS/RDS"
+  metric_name         = "FreeStorageSpace"
+  statistic           = "Minimum"
+  period              = 300
+  evaluation_periods  = 3
+  threshold           = var.db_allocated_storage * 0.2 * 1024 * 1024 * 1024
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    DBInstanceIdentifier = aws_db_instance.mcp.identifier
+  }
+
+  alarm_actions = [aws_sns_topic.alerts[0].arn]
+  ok_actions    = [aws_sns_topic.alerts[0].arn]
+}

@@ -125,6 +125,12 @@ cd terraform/aws
 terraform destroy -var-file="prod.tfvars" -var="census_api_key=$CENSUS_API_KEY"
 ```
 
+The database has `deletion_protection = true`, so the destroy is refused until
+you set it to `false` in `terraform/aws/rds.tf` and apply. The destroy then
+leaves a final snapshot named `<lambda_name>-db-final`; delete it by hand if you
+do not want it (it is billed as snapshot storage, and a second destroy fails
+while a snapshot of that name exists).
+
 The S3 state bucket and DynamoDB lock table (created by `terraform/bootstrap`)
 are retained with `prevent_destroy = true` — remove that lifecycle block and
 re-apply the bootstrap stack if you really want them gone.
