@@ -10,6 +10,7 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
+import { TOOL_CALL_BUDGET_MS, withDeadline } from './helpers/http.js'
 import { SERVER_INSTRUCTIONS } from './instructions.js'
 import { MCPPrompt, PromptRegistry } from './prompts/base.prompt.js'
 import {
@@ -107,7 +108,12 @@ export class MCPServer {
         isError: true,
       }
     }
-    return await tool.handler(parsed.data)
+    // One overall deadline for everything the call fetches from the Census
+    // API, so a slow upstream yields an actionable tool error instead of a
+    // Lambda/gateway timeout (see helpers/http.ts).
+    return await withDeadline(TOOL_CALL_BUDGET_MS, () =>
+      tool.handler(parsed.data),
+    )
   }
 
   registerTool<T extends object>(tool: MCPTool<T>) {

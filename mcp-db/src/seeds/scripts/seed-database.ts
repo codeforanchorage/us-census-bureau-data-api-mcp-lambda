@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import 'dotenv/config'
+import { pathToFileURL } from 'node:url'
 
 import { DATABASE_URL } from '../../helpers/database.helper.js'
 import {
@@ -164,8 +165,14 @@ export async function main(runSeedsFunction = runSeeds): Promise<void> {
   }
 }
 
-// ES module equivalent of "if (require.main === module)"
-if (import.meta.url === `file://${process.argv[1]}`) {
+// ES module equivalent of "if (require.main === module)". pathToFileURL,
+// not a hand-built `file://${argv[1]}`: on Windows the script path is
+// C:\... and never equals the file:///C:/... module URL, so the seed
+// silently did nothing there.
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   main()
 }
 

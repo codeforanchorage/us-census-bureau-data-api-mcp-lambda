@@ -147,23 +147,41 @@ export class GetIndicatorTool extends BaseTool<GetIndicatorArgs> {
   }
 }
 
-// Latest vintage of an ACS dataset: last calendar year if its metadata is
-// published, otherwise the year before. A failed probe (outage) falls back
-// to the older year, which is always published.
+// Latest published vintage of an ACS dataset. Last calendar year is tried
+// first, then the year before: a release can slip past the turn of the year
+// (the 2025 ACS did), so "the year before" is not always published either.
+// Only a definitive answer is cached. A probe that fails for another reason
+// (timeout, 5xx) yields a best guess for this call alone -- caching it would
+// pin the warm container to an older vintage for hours after a brief outage.
 async function latestVintage(dataset: string): Promise<number> {
   const cached = latestCache.get(dataset)
   if (cached && Date.now() - cached.at < LATEST_TTL_MS) return cached.year
 
-  const candidate = new Date().getUTCFullYear() - 1
-  let year = candidate - 1
+  const newest = new Date().getUTCFullYear() - 1
+  const remember = (year: number) => {
+    latestCache.set(dataset, { year, at: Date.now() })
+    return year
+  }
+
+  for (const year of [newest, newest - 1]) {
+    const state = await probeVintage(dataset, year)
+    if (state === 'published') return remember(year)
+    if (state === 'unknown') return year - 1
+  }
+  return remember(newest - 2)
+}
+
+async function probeVintage(
+  dataset: string,
+  year: number,
+): Promise<'published' | 'missing' | 'unknown'> {
   try {
     const res = await fetchWithTimeout(
-      `https://api.census.gov/data/${candidate}/${dataset}.json`,
+      `https://api.census.gov/data/${year}/${dataset}.json`,
     )
-    if (res.ok) year = candidate
+    if (res.ok) return 'published'
+    return res.status === 404 ? 'missing' : 'unknown'
   } catch {
-    // keep the older, always-published year
+    return 'unknown'
   }
-  latestCache.set(dataset, { year, at: Date.now() })
-  return year
 }

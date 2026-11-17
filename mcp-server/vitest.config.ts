@@ -51,6 +51,11 @@ export default defineConfig({
           // one worker, no per-file module isolation (the shared test
           // database is the reason these run serially).
           maxWorkers: 1,
+          // Vitest refuses to start ("different 'maxWorkers' but same
+          // 'sequence.groupOrder'") when projects with different worker
+          // counts share a group, which is what a plain `npm test` -- and so
+          // CI -- runs. Its own group, after the unit project.
+          sequence: { groupOrder: 1 },
           isolate: false,
           fileParallelism: false,
           testTimeout: 30000,

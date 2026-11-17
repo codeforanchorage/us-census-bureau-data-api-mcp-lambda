@@ -43,9 +43,11 @@ describe('cold-start failure recovery', () => {
     // No DATABASE_URL and no DB_SECRET_ARN: loadSecrets throws.
     const failed = await handler(toolsListEvent())
     expect(failed.statusCode).toBe(500)
-    expect(JSON.parse(failed.body).error.message).toMatch(
-      /Initialization failed/,
-    )
+    const message = JSON.parse(failed.body).error.message
+    expect(message).toMatch(/Initialization failed/)
+    // The cause (which can name the secret ARN or the account) is logged,
+    // never returned to the caller.
+    expect(message).not.toMatch(/DB_SECRET_ARN|DATABASE_URL|arn:aws/)
 
     // The transient cause clears; the same warm container must recover.
     process.env.DATABASE_URL = 'postgresql://user:pass@localhost:5432/test'

@@ -576,11 +576,14 @@ async function routeRequest(event: LambdaEvent): Promise<LambdaResponse> {
     }
     return response
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    // The cause stays in the logs (console.error survives the DEBUG_LOGS
+    // suppression): secret-loading errors name the secret's ARN, and AWS
+    // SDK errors the role and account, none of which a caller should see.
+    console.error('Initialization failed:', err)
     return errorResponse(
       parsed.id ?? null,
       -32603,
-      `Initialization failed: ${message}`,
+      'Initialization failed: the server could not start. Retry after a short delay.',
       500,
     )
   }

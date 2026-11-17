@@ -273,6 +273,44 @@ describe('GetIndicatorTool', () => {
     expect(dataCalls()).toEqual([`${THIS_YEAR - 2}/acs/acs5`])
   })
 
+  it('goes back a second year when a delayed release leaves both unpublished', async () => {
+    route('B01003_001E', 'Estimate!!Total', {
+      probe: {
+        [`${THIS_YEAR - 1}/acs/acs5`]: 404,
+        [`${THIS_YEAR - 2}/acs/acs5`]: 404,
+      },
+    })
+    await tool.toolHandler(
+      { indicator: 'population', product: '5-year', ...geo },
+      'k',
+    )
+    expect(dataCalls()).toEqual([`${THIS_YEAR - 3}/acs/acs5`])
+  })
+
+  it('does not cache a vintage guessed during a Census outage', async () => {
+    const probeKey = `${THIS_YEAR - 1}/acs/acs1`
+    route('B01003_001E', 'Estimate!!Total', { probe: { [probeKey]: 503 } })
+    await tool.toolHandler({ indicator: 'population', ...geo }, 'k')
+    expect(dataCalls()).toEqual([`${THIS_YEAR - 2}/acs/acs1`])
+
+    // The outage ends: the same warm container must find the newer vintage
+    // on its next call instead of serving the guess for hours.
+    mockFetch.mockClear()
+    route('B01003_001E', 'Estimate!!Total')
+    await tool.toolHandler({ indicator: 'population', ...geo }, 'k')
+    expect(dataCalls()).toEqual([`${THIS_YEAR - 1}/acs/acs1`])
+  })
+
+  it('caches a definitive vintage answer', async () => {
+    route('B01003_001E', 'Estimate!!Total')
+    await tool.toolHandler({ indicator: 'population', ...geo }, 'k')
+    await tool.toolHandler({ indicator: 'population', ...geo }, 'k')
+    const probes = mockFetch.mock.calls.filter(([u]) =>
+      /acs1\.json$/.test(String(u)),
+    )
+    expect(probes).toHaveLength(1)
+  })
+
   it('refuses a cell whose published label is a different statistic', async () => {
     route('S1501_C02_015E', PUBLISHED.bachelors_or_higher.wrong![0])
     const r = await tool.toolHandler(
