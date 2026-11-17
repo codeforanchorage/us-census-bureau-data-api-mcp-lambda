@@ -33,6 +33,7 @@ function request(n: number): CacheQueryRequest {
 describe('QueryCacheService (integration)', () => {
   let client: Client
   let cache: QueryCacheService
+  let databaseService: DatabaseService
 
   const years = async () =>
     (
@@ -44,12 +45,17 @@ describe('QueryCacheService (integration)', () => {
   beforeAll(async () => {
     client = new Client(databaseConfig)
     await client.connect()
-    cache = new QueryCacheService(DatabaseService.getInstance())
+    // Integration files share one module registry (isolate: false) and each
+    // closes the pool when it finishes, so start from a fresh instance.
+    ;(DatabaseService as unknown as { instance: unknown }).instance = undefined
+    databaseService = DatabaseService.getInstance()
+    cache = new QueryCacheService(databaseService)
   })
 
   afterAll(async () => {
     await client.query('DELETE FROM census_data_cache')
     await client.end()
+    await databaseService.cleanup()
   })
 
   beforeEach(async () => {
