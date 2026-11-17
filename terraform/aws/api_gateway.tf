@@ -39,16 +39,20 @@ resource "aws_api_gateway_integration" "mcp_post_integration" {
   uri                     = aws_lambda_function.mcp_server.invoke_arn
 }
 
+# The CORS preflight goes to the Lambda, like POST. It used to be answered by
+# a MOCK integration here, which meant the Lambda's own preflight handling
+# never ran in production: every origin got `Access-Control-Allow-Origin: *`
+# (the Lambda refuses disallowed origins with 403), and the allowed headers
+# were a stale hand-kept copy that lacked mcp-protocol-version, mcp-method
+# and mcp-name, so a browser client sending them failed its preflight.
 resource "aws_api_gateway_integration" "mcp_options_integration" {
   rest_api_id = aws_api_gateway_rest_api.mcp_api.id
   resource_id = aws_api_gateway_resource.mcp.id
   http_method = aws_api_gateway_method.mcp_options.http_method
 
-  type = "MOCK"
-
-  request_templates = {
-    "application/json" = "{\"statusCode\": 200}"
-  }
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.mcp_server.invoke_arn
 }
 
 resource "aws_api_gateway_method_response" "mcp_post_response_200" {
@@ -62,38 +66,6 @@ resource "aws_api_gateway_method_response" "mcp_post_response_200" {
     "method.response.header.Access-Control-Allow-Headers" = true
     "method.response.header.Access-Control-Allow-Methods" = true
   }
-}
-
-resource "aws_api_gateway_method_response" "mcp_options_response_200" {
-  rest_api_id = aws_api_gateway_rest_api.mcp_api.id
-  resource_id = aws_api_gateway_resource.mcp.id
-  http_method = aws_api_gateway_method.mcp_options.http_method
-  status_code = "200"
-
-  response_parameters = {
-    "method.response.header.Access-Control-Allow-Origin"  = true
-    "method.response.header.Access-Control-Allow-Headers" = true
-    "method.response.header.Access-Control-Allow-Methods" = true
-  }
-}
-
-resource "aws_api_gateway_integration_response" "mcp_options_integration_response" {
-  rest_api_id = aws_api_gateway_rest_api.mcp_api.id
-  resource_id = aws_api_gateway_resource.mcp.id
-  http_method = aws_api_gateway_method.mcp_options.http_method
-  status_code = aws_api_gateway_method_response.mcp_options_response_200.status_code
-
-  response_parameters = {
-    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
-    "method.response.header.Access-Control-Allow-Headers" = "'content-type,mcp-session-id'"
-    "method.response.header.Access-Control-Allow-Methods" = "'OPTIONS,POST'"
-  }
-
-  response_templates = {
-    "application/json" = ""
-  }
-
-  depends_on = [aws_api_gateway_integration.mcp_options_integration]
 }
 
 resource "aws_lambda_permission" "api_gateway" {
@@ -114,6 +86,11 @@ resource "aws_api_gateway_deployment" "mcp_deployment" {
       aws_api_gateway_method.mcp_options.id,
       aws_api_gateway_integration.mcp_post_integration.id,
       aws_api_gateway_integration.mcp_options_integration.id,
+      # Resource ids do not change on an in-place edit, so a change of
+      # integration type or target would otherwise never be redeployed to
+      # the stage.
+      aws_api_gateway_integration.mcp_post_integration.type,
+      aws_api_gateway_integration.mcp_options_integration.type,
     ]))
   }
 
@@ -127,8 +104,6 @@ resource "aws_api_gateway_deployment" "mcp_deployment" {
     aws_api_gateway_integration.mcp_post_integration,
     aws_api_gateway_integration.mcp_options_integration,
     aws_api_gateway_method_response.mcp_post_response_200,
-    aws_api_gateway_method_response.mcp_options_response_200,
-    aws_api_gateway_integration_response.mcp_options_integration_response,
   ]
 }
 

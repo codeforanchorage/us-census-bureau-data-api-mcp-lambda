@@ -83,6 +83,47 @@ async function transportChecks() {
   const evil = await post(rpc(3, "ping"), { Origin: "https://evil.example" });
   check("Origin https://evil.example refused with 403", evil.status === 403);
 
+  // The CORS preflight must reach the server too: a gateway-level canned
+  // answer once served every origin a wildcard and a stale header list.
+  const preflight = (origin) =>
+    fetch(BASE_URL, {
+      method: "OPTIONS",
+      headers: {
+        Origin: origin,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers":
+          "content-type,mcp-protocol-version,mcp-method,mcp-name",
+      },
+    });
+  const preflightOk = await preflight("https://claude.ai");
+  check(
+    "preflight from https://claude.ai succeeds",
+    preflightOk.status === 204 || preflightOk.status === 200,
+    String(preflightOk.status),
+  );
+  check(
+    "preflight echoes the allowed Origin (no wildcard)",
+    preflightOk.headers.get("access-control-allow-origin") ===
+      "https://claude.ai",
+    String(preflightOk.headers.get("access-control-allow-origin")),
+  );
+  const preflightHeaders = (
+    preflightOk.headers.get("access-control-allow-headers") ?? ""
+  ).toLowerCase();
+  check(
+    "preflight allows the MCP request headers",
+    ["mcp-protocol-version", "mcp-method", "mcp-name", "mcp-session-id"].every(
+      (h) => preflightHeaders.includes(h),
+    ),
+    preflightHeaders,
+  );
+  const preflightEvil = await preflight("https://evil.example");
+  check(
+    "preflight from https://evil.example refused with 403",
+    preflightEvil.status === 403,
+    String(preflightEvil.status),
+  );
+
   const badVersion = await post(rpc(4, "ping"), {
     "MCP-Protocol-Version": "2099-01-01",
   });

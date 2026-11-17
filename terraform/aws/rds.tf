@@ -86,8 +86,14 @@ resource "aws_db_instance" "mcp" {
 
   publicly_accessible = true
   multi_az            = false
-  skip_final_snapshot = true
-  deletion_protection = false
+
+  # The data is reseedable, but a reseed is hours of work and the response
+  # cache is not, so an accidental destroy should be refused and a deliberate
+  # one should leave a snapshot. To tear the stack down on purpose: set
+  # deletion_protection = false, apply, then destroy.
+  deletion_protection       = true
+  skip_final_snapshot       = false
+  final_snapshot_identifier = "${local.lambda_name}-db-final"
 
   backup_retention_period = 1
   apply_immediately       = true
