@@ -1,11 +1,9 @@
 # U.S. Census Bureau Data API MCP
 [![License: CC0-1.0](https://img.shields.io/badge/License-CC0%201.0-lightgrey.svg)](https://github.com/uscensusbureau/us-census-bureau-data-api-mcp/blob/main/LICENSE)
-[![MCP Project Build](https://github.com/uscensusbureau/us-census-bureau-data-api-mcp/actions/workflows/build.yml/badge.svg)](https://github.com/uscensusbureau/us-census-bureau-data-api-mcp/actions/workflows/build.yml)
-[![MCP Project - Lint](https://github.com/uscensusbureau/us-census-bureau-data-api-mcp/actions/workflows/lint.yml/badge.svg)](https://github.com/uscensusbureau/us-census-bureau-data-api-mcp/actions/workflows/lint.yml)
-[![MCP Server - Tests](https://github.com/uscensusbureau/us-census-bureau-data-api-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/uscensusbureau/us-census-bureau-data-api-mcp/actions/workflows/test.yml)
-[![MCP Database - Tests](https://github.com/uscensusbureau/us-census-bureau-data-api-mcp/actions/workflows/test-db.yml/badge.svg)](https://github.com/uscensusbureau/us-census-bureau-data-api-mcp/actions/workflows/test-db.yml)
-![MCP Server - Test Coverage](https://raw.githubusercontent.com/gist/luke-keller-census/0589e2c69696f077eef7d6af818a108b/raw/badge.svg)
-![MCP Database - Test Coverage](https://raw.githubusercontent.com/gist/luke-keller-census/ae50d82d94893c2e674f7f742aea958e/raw/badge.svg)
+[![MCP Project Build](https://github.com/codeforanchorage/us-census-bureau-data-api-mcp-lambda/actions/workflows/build.yml/badge.svg)](https://github.com/codeforanchorage/us-census-bureau-data-api-mcp-lambda/actions/workflows/build.yml)
+[![MCP Project - Lint](https://github.com/codeforanchorage/us-census-bureau-data-api-mcp-lambda/actions/workflows/lint.yml/badge.svg)](https://github.com/codeforanchorage/us-census-bureau-data-api-mcp-lambda/actions/workflows/lint.yml)
+[![MCP Server - Tests](https://github.com/codeforanchorage/us-census-bureau-data-api-mcp-lambda/actions/workflows/test.yml/badge.svg)](https://github.com/codeforanchorage/us-census-bureau-data-api-mcp-lambda/actions/workflows/test.yml)
+[![MCP Database - Tests](https://github.com/codeforanchorage/us-census-bureau-data-api-mcp-lambda/actions/workflows/test-db.yml/badge.svg)](https://github.com/codeforanchorage/us-census-bureau-data-api-mcp-lambda/actions/workflows/test-db.yml)
 
 Bringing _official_ Census Bureau statistics to AI assistants everywhere.
 
@@ -47,7 +45,7 @@ Manager + Lambda free tier).
 
 - AWS CLI configured for account `420839047325` / region `us-west-2`
 - Terraform ≥ 1.10 (S3-native state locking)
-- Node 18+, npm
+- Node 24, npm
 - A Census Data API key — https://api.census.gov/data/key_signup.html
 
 ### One-time setup
@@ -155,7 +153,7 @@ To get started, you will need:
 
 * A valid Census Bureau [Data API key](https://api.census.gov/data/key_signup.html)
 * Docker (i.e. Docker Desktop)
-* Node 18+
+* Node 24
 
 ## Using the MCP Server
 To use the U.S. Census Bureau Data API MCP server:
