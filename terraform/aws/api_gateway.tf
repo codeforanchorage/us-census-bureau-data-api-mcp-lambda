@@ -125,10 +125,6 @@ resource "aws_api_gateway_deployment" "mcp_deployment" {
 resource "aws_cloudwatch_log_group" "api_gateway_access_logs" {
   name              = "/aws/apigateway/${local.lambda_name}-access"
   retention_in_days = 14
-
-  tags = {
-    Project = "mcp-server"
-  }
 }
 
 resource "aws_api_gateway_stage" "stage" {

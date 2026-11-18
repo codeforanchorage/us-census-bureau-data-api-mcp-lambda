@@ -94,6 +94,9 @@ resource "aws_db_instance" "mcp" {
   deletion_protection       = true
   skip_final_snapshot       = false
   final_snapshot_identifier = "${local.lambda_name}-db-final"
+  # Snapshots (including the final one) carry the instance tags, so their
+  # storage is attributed to the project too.
+  copy_tags_to_snapshot = true
 
   backup_retention_period = 1
   apply_immediately       = true
