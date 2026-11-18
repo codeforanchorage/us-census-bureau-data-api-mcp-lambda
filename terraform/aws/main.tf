@@ -16,6 +16,14 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
+
+  # Every taggable resource in this stack inherits the fleet cost-allocation
+  # tag, so nothing new can be left out of the Project=mcp-server view.
+  default_tags {
+    tags = {
+      Project = "mcp-server"
+    }
+  }
 }
 
 locals {
@@ -92,8 +100,4 @@ resource "aws_lambda_function" "mcp_server" {
 resource "aws_cloudwatch_log_group" "lambda_logs" {
   name              = "/aws/lambda/${local.lambda_name}"
   retention_in_days = 14
-
-  tags = {
-    Project = "mcp-server"
-  }
 }
